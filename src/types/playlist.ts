@@ -6,6 +6,10 @@ export type PlaylistTrack = {
   artist: string;
   source: "SoundCloud" | "Audius" | "Telegram Test" | "Telegram";
   duration: string;
+  fileId?: string;
+  streamUrl?: string;
+  thumbnailFileId?: string | null;
+  coverUrl?: string | null;
 };
 
 export type Playlist = {

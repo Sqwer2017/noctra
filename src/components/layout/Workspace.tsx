@@ -13,6 +13,11 @@ import {
   X,
 } from "lucide-react";
 
+import {
+  getTelegramTracks,
+  syncTelegramTracks,
+} from "../../services/telegramTracks";
+
 import { getWindowMeta } from "../../data/windowRegistry";
 import type { WindowId } from "../../types/windows";
 import { DesktopWindow } from "../windows/DesktopWindow";
@@ -395,6 +400,33 @@ function ProfileWindowContent() {
   );
 }
 
+function TrackCover({
+  track,
+  size = "h-12 w-12",
+}: {
+  track: PlaylistTrack;
+  size?: string;
+}) {
+  return (
+    <div
+      className={`relative ${size} shrink-0 overflow-hidden rounded-xl border border-purple-300/10 bg-black`}
+    >
+      {track.coverUrl ? (
+        <img
+          src={track.coverUrl}
+          alt=""
+          draggable={false}
+          className="absolute inset-0 h-full w-full scale-[1.08] object-cover"
+        />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-purple-500/35 to-black">
+          <Music size={18} className="text-purple-100/65" />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MusicSearchWindowContent({
   playlists,
   onAddTrackToPlaylist,
@@ -407,8 +439,25 @@ function MusicSearchWindowContent({
   onPlayTrack: (track: PlaylistTrack, queue?: PlaylistTrack[]) => void;
 }) {
   const [selectedTrack, setSelectedTrack] = useState<PlaylistTrack | null>(null);
+  const [isAddMenuClosing, setIsAddMenuClosing] = useState(false);
 
-  const mockTracks: PlaylistTrack[] = [
+  function openAddMenu(track: PlaylistTrack) {
+    setIsAddMenuClosing(false);
+    setSelectedTrack(track);
+  }
+
+  function closeAddMenu() {
+    if (!selectedTrack) return;
+
+    setIsAddMenuClosing(true);
+
+    window.setTimeout(() => {
+      setSelectedTrack(null);
+      setIsAddMenuClosing(false);
+    }, 240);
+  }
+
+  const fallbackTracks: PlaylistTrack[] = [
     {
       id: "track-1",
       title: "Eclipse of the Fallen",
@@ -430,20 +479,40 @@ function MusicSearchWindowContent({
       source: "Telegram Test",
       duration: "2:57",
     },
-    {
-      id: "track-4",
-      title: "Midnight Respawn",
-      artist: "Noctra Lab",
-      source: "Telegram Test",
-      duration: "3:11",
-    },
   ];
+
+  const [tracks, setTracks] = useState<PlaylistTrack[]>(fallbackTracks);
+  const [isLoadingTelegram, setIsLoadingTelegram] = useState(false);
+  const [telegramError, setTelegramError] = useState<string | null>(null);
+
+  async function loadTelegramTracks(sync = false) {
+    try {
+      setIsLoadingTelegram(true);
+      setTelegramError(null);
+
+      const loadedTracks = sync
+        ? await syncTelegramTracks()
+        : await getTelegramTracks();
+
+      setTracks(loadedTracks.length > 0 ? loadedTracks : fallbackTracks);
+    } catch (error) {
+      setTelegramError(
+        error instanceof Error ? error.message : "Telegram loading error",
+      );
+    } finally {
+      setIsLoadingTelegram(false);
+    }
+  }
+
+  useEffect(() => {
+    loadTelegramTracks(false);
+  }, []);
 
   function handleAddTrack(playlistId: string) {
     if (!selectedTrack) return;
 
     onAddTrackToPlaylist(playlistId, selectedTrack);
-    setSelectedTrack(null);
+    closeAddMenu();
   }
 
   return (
@@ -453,8 +522,38 @@ function MusicSearchWindowContent({
         Search tracks, artists or sources...
       </div>
 
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          onClick={() => loadTelegramTracks(false)}
+          disabled={isLoadingTelegram}
+          className="rounded-2xl border border-purple-300/20 bg-purple-500/15 px-4 py-3 text-sm text-purple-50 transition hover:bg-purple-500/25 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {isLoadingTelegram ? "Loading..." : "Load Telegram tracks"}
+        </button>
+
+        <button
+          onClick={() => loadTelegramTracks(true)}
+          disabled={isLoadingTelegram}
+          className="rounded-2xl border border-sky-300/20 bg-sky-500/10 px-4 py-3 text-sm text-sky-50 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Sync bot messages
+        </button>
+      </div>
+
+      {telegramError && (
+        <div className="rounded-2xl border border-red-300/20 bg-red-500/10 p-3 text-sm text-red-100/75">
+          {telegramError}
+        </div>
+      )}
+
       {selectedTrack && (
-        <div className="rounded-3xl border border-purple-300/20 bg-purple-500/10 p-4">
+        <div
+          className={`rounded-3xl border border-purple-300/20 bg-purple-500/10 p-4 ${
+            isAddMenuClosing
+              ? "animate-[playerMenuOut_240ms_cubic-bezier(0.7,0,0.84,0)_forwards]"
+              : "animate-[playerMenuIn_340ms_cubic-bezier(0.16,1,0.3,1)]"
+            }`}
+          >
           <div className="mb-3 flex items-start justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-white">
@@ -466,7 +565,7 @@ function MusicSearchWindowContent({
             </div>
 
             <button
-              onClick={() => setSelectedTrack(null)}
+              onClick={closeAddMenu}
               className="rounded-full p-1 text-purple-100/40 transition hover:bg-white/10 hover:text-white"
             >
               <X size={15} />
@@ -522,14 +621,12 @@ function MusicSearchWindowContent({
       )}
 
       <div className="min-h-0 flex-1 space-y-3 overflow-auto pr-1 noctra-scrollbar">
-        {mockTracks.map((track) => (
+        {tracks.map((track) => (
           <div
             key={track.id}
             className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-3 transition hover:bg-white/[0.07]"
           >
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-purple-500/35 to-black">
-              <Music size={18} />
-            </div>
+            <TrackCover track={track} />
 
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold text-white">
@@ -546,7 +643,7 @@ function MusicSearchWindowContent({
             </span>
 
             <button 
-              onClick={() => onPlayTrack(track, mockTracks)}
+              onClick={() => onPlayTrack(track, tracks)}
               className="rounded-full bg-purple-500/25 p-2 text-white transition hover:bg-purple-500/40"
               title="Play track"
             >
@@ -554,7 +651,7 @@ function MusicSearchWindowContent({
             </button>
 
             <button
-              onClick={() => setSelectedTrack(track)}
+              onClick={() => openAddMenu(track)}
               className="rounded-full bg-purple-500/15 p-2 text-purple-100 transition hover:bg-purple-500/30 hover:text-white"
               title="Add to playlist"
             >
@@ -934,9 +1031,7 @@ function PlaylistDetailsWindowContent({
                 key={track.id}
                 className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-3"
               >
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-purple-500/35 to-black">
-                  <Music size={17} />
-                </div>
+                <TrackCover track={track} size="h-11 w-11" />
 
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-white">

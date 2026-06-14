@@ -1,4 +1,11 @@
-import { useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ChangeEvent,
+} from "react";
+
 import {
   Check,
   Heart,
@@ -9,6 +16,7 @@ import {
   SkipBack,
   SkipForward,
   Volume2,
+  VolumeX,
   X,
 } from "lucide-react";
 
@@ -49,6 +57,83 @@ export function BottomPlayer({
     useState<PlayerMenuState>("closed");
   const [playlistMenuState, setPlaylistMenuState] =
     useState<PlayerMenuState>("closed");
+
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [audioDuration, setAudioDuration] = useState(0);
+  const [volume, setVolume] = useState(0.75);
+  const [isMuted, setIsMuted] = useState(false);
+
+  const hasAudioSource = Boolean(currentTrack?.streamUrl);
+
+  const effectiveVolume = isMuted ? 0 : volume;
+  const volumeProgress = Math.round(effectiveVolume * 100);
+
+  const safeAudioDuration = Number.isFinite(audioDuration) ? audioDuration : 0;
+
+  const progress =
+    safeAudioDuration > 0
+      ? Math.min((currentTime / safeAudioDuration) * 100, 100)
+      : 0;
+
+  function getRangeStyle(value: number) {
+    return {
+      "--range-progress": `${value}%`,
+    } as CSSProperties;
+  }
+
+  useEffect(() => {
+    if (!audioRef.current) return;
+
+    audioRef.current.volume = effectiveVolume;
+  }, [effectiveVolume]);
+
+  function handleSeek(event: ChangeEvent<HTMLInputElement>) {
+    if (!audioRef.current || !hasAudioSource) return;
+
+    const nextTime = Number(event.target.value);
+
+    if (Number.isNaN(nextTime)) return;
+
+    audioRef.current.currentTime = nextTime;
+    setCurrentTime(nextTime);
+  }
+
+  function handleVolumeChange(event: ChangeEvent<HTMLInputElement>) {
+    const nextVolume = Number(event.target.value) / 100;
+
+    if (Number.isNaN(nextVolume)) return;
+
+    setVolume(nextVolume);
+    setIsMuted(nextVolume === 0);
+  }
+
+  function toggleMute() {
+    setIsMuted((value) => !value);
+  }
+
+  function formatTime(seconds: number) {
+    if (!seconds || Number.isNaN(seconds)) {
+      return "0:00";
+    }
+
+    const minutes = Math.floor(seconds / 60);
+    const restSeconds = Math.floor(seconds % 60);
+
+    return `${minutes}:${String(restSeconds).padStart(2, "0")}`;
+  }
+
+  function togglePlayback() {
+    if (!audioRef.current || !hasAudioSource) return;
+
+    if (audioRef.current.paused) {
+      audioRef.current.play().then(() => setIsPlaying(true));
+    } else {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    }
+  }
 
   const title = currentTrack?.title ?? "No track selected";
   const artist = currentTrack?.artist ?? "Choose a track from Music Search";
@@ -112,6 +197,19 @@ export function BottomPlayer({
           : "animate-[playerIn_420ms_cubic-bezier(0.16,1,0.3,1)]"
         }`}
       >
+        <audio
+          ref={audioRef}
+          src={currentTrack?.streamUrl}
+          onTimeUpdate={(event) => {
+            setCurrentTime(event.currentTarget.currentTime);
+          }}
+          onLoadedMetadata={(event) => {
+            setAudioDuration(event.currentTarget.duration);
+          }}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
+          onEnded={onNextTrack}
+          />
         
       {isPlaylistMenuVisible && (
         <div
@@ -246,8 +344,14 @@ export function BottomPlayer({
                         : "text-purple-100/55 hover:bg-white/[0.06] hover:text-white"
                     }`}
                   >
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-purple-300/10 bg-purple-500/10">
-                      {isCurrent ? <Pause size={15} /> : <Play size={15} />}
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-purple-300/10 bg-purple-500/10">
+                      {track.coverUrl ? (
+                        <img src={track.coverUrl} alt="" className="h-full w-full object-cover" />
+                      ) : isCurrent ? (
+                        <Pause size={15} />
+                      ) : (
+                        <Play size={15} />
+                      )}
                     </div>
 
                     <div className="min-w-0 flex-1">
@@ -270,7 +374,15 @@ export function BottomPlayer({
         </div>
       )}
 
-      <div className="h-14 w-14 shrink-0 rounded-2xl bg-gradient-to-br from-purple-500/40 to-black shadow-lg shadow-purple-950/30" />
+      <div className="h-14 w-14 shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-purple-500/40 to-black shadow-lg shadow-purple-950/30">
+        {currentTrack?.coverUrl && (
+          <img
+            src={currentTrack.coverUrl}
+            alt=""
+            className="h-full w-full object-cover"
+          />
+        )}
+      </div>
 
       <div className="w-40 min-w-0">
         <p className="truncate text-sm font-semibold">{title}</p>
@@ -324,10 +436,12 @@ export function BottomPlayer({
           </button>
 
           <button
-            disabled={!currentTrack}
+            onClick={togglePlayback}
+            disabled={!hasAudioSource}
             className="rounded-full bg-purple-500/30 p-3 text-white shadow-lg shadow-purple-900/30 transition hover:bg-purple-500/45 disabled:cursor-not-allowed disabled:opacity-40"
+            title={hasAudioSource ? "Play / Pause" : "No audio source"}
           >
-            <Pause size={18} />
+            {isPlaying ? <Pause size={18} /> : <Play size={18} />}
           </button>
 
           <button
@@ -340,21 +454,25 @@ export function BottomPlayer({
         </div>
 
         <div className="flex w-full max-w-xl items-center gap-3 text-[11px] text-purple-100/35">
-          <span>{currentTrack ? "0:00" : "—"}</span>
+          <span>{hasAudioSource ? formatTime(currentTime) : "—"}</span>
 
-          <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/10">
-            <div
-              className={`h-full rounded-full bg-purple-300 ${
-                currentTrack ? "w-1/3" : "w-0"
-              }`}
-            />
-          </div>
+        <input
+          type="range"
+          min="0"
+          max={safeAudioDuration || 0}
+          step="0.1"
+          value={hasAudioSource ? Math.min(currentTime, safeAudioDuration || 0) : 0}
+          onChange={handleSeek}
+          disabled={!hasAudioSource}
+          style={getRangeStyle(progress)}
+          className="noctra-range flex-1 cursor-pointer disabled:cursor-not-allowed"
+        />
 
-          <span>{duration}</span>
+        <span>{hasAudioSource ? formatTime(safeAudioDuration) : duration}</span>
+
         </div>
       </div>
 
-      <div className="hidden items-center gap-3 text-purple-100/50 lg:flex">
         <button
           onClick={toggleQueueMenu}
           className={`rounded-full p-2 transition hover:bg-white/10 hover:text-white ${
@@ -365,12 +483,27 @@ export function BottomPlayer({
           <ListMusic size={18} />
         </button>
 
-        <Volume2 size={18} />
+        <button
+          onClick={toggleMute}
+          className="rounded-full p-1 transition hover:bg-white/10 hover:text-white"
+          title={isMuted ? "Unmute" : "Mute"}
+        >
+          {isMuted || volumeProgress === 0 ? (
+            <VolumeX size={18} />
+          ) : (
+            <Volume2 size={18} />
+          )}
+        </button>
 
-        <div className="h-1 w-24 rounded-full bg-white/10">
-          <div className="h-full w-2/3 rounded-full bg-purple-200" />
-        </div>
-      </div>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          value={volumeProgress}
+          onChange={handleVolumeChange}
+          style={getRangeStyle(volumeProgress)}
+          className="noctra-range w-24 cursor-pointer"
+        />
 
       <button
         onClick={onClose}
