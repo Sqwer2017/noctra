@@ -64,6 +64,7 @@ export function BottomPlayer({
   const [audioDuration, setAudioDuration] = useState(0);
   const [volume, setVolume] = useState(0.75);
   const [isMuted, setIsMuted] = useState(false);
+  const shouldAutoPlayRef = useRef(false);
 
   const hasAudioSource = Boolean(currentTrack?.streamUrl);
 
@@ -88,6 +89,22 @@ export function BottomPlayer({
 
     audioRef.current.volume = effectiveVolume;
   }, [effectiveVolume]);
+
+  useEffect(() => {
+    setCurrentTime(0);
+    setAudioDuration(0);
+
+    if (!audioRef.current || !currentTrack?.streamUrl) {
+      setIsPlaying(false);
+      shouldAutoPlayRef.current = false;
+      return;
+    }
+
+    shouldAutoPlayRef.current = true;
+
+    audioRef.current.pause();
+    audioRef.current.load();
+  }, [currentTrack?.id, currentTrack?.streamUrl]);
 
   function handleSeek(event: ChangeEvent<HTMLInputElement>) {
     if (!audioRef.current || !hasAudioSource) return;
@@ -128,9 +145,22 @@ export function BottomPlayer({
     if (!audioRef.current || !hasAudioSource) return;
 
     if (audioRef.current.paused) {
-      audioRef.current.play().then(() => setIsPlaying(true));
+      shouldAutoPlayRef.current = true;
+      void startPlayback();
     } else {
+      shouldAutoPlayRef.current = false;
       audioRef.current.pause();
+      setIsPlaying(false);
+    }
+  }
+
+  async function startPlayback() {
+    if (!audioRef.current || !hasAudioSource) return;
+
+    try {
+      await audioRef.current.play();
+      setIsPlaying(true);
+    } catch {
       setIsPlaying(false);
     }
   }
@@ -200,6 +230,13 @@ export function BottomPlayer({
         <audio
           ref={audioRef}
           src={currentTrack?.streamUrl}
+          preload="metadata"
+          onCanPlay={() => {
+            if (!shouldAutoPlayRef.current) return;
+
+            shouldAutoPlayRef.current = false;
+            void startPlayback();
+          }}
           onTimeUpdate={(event) => {
             setCurrentTime(event.currentTarget.currentTime);
           }}
@@ -208,7 +245,10 @@ export function BottomPlayer({
           }}
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
-          onEnded={onNextTrack}
+          onEnded={() => {
+            shouldAutoPlayRef.current = true;
+            onNextTrack();
+          }}
           />
         
       {isPlaylistMenuVisible && (

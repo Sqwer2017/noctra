@@ -9,7 +9,6 @@ import {
   Radio,
   Search,
   Settings,
-  Trash2,
   X,
 } from "lucide-react";
 
@@ -24,6 +23,7 @@ import { DesktopWindow } from "../windows/DesktopWindow";
 import { useEffect, useState } from "react";
 import type { Playlist, PlaylistPrivacy, PlaylistTrack } from "../../types/playlist";
 import { LayoutGroup, motion } from "motion/react";
+import { TrackRow } from "../tracks/TrackRow";
 
 type WorkspaceProps = {
   openedWindows: WindowId[];
@@ -270,6 +270,25 @@ function FavoritesWindowContent({
   onPlayTrack: (track: PlaylistTrack, queue?: PlaylistTrack[]) => void;
   onRemoveFavoriteTrack: (trackId: string) => void;
 }) {
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+
+  const filteredFavoriteTracks = normalizedSearchQuery
+    ? favoriteTracks.filter((track) => {
+        const searchableText = [
+          track.title,
+          track.artist,
+          track.source,
+          track.duration,
+        ]
+          .join(" ")
+          .toLowerCase();
+
+        return searchableText.includes(normalizedSearchQuery);
+      })
+    : favoriteTracks;
+
   if (favoriteTracks.length === 0) {
     return (
       <div className="flex h-full items-center justify-center rounded-3xl border border-dashed border-purple-300/20 bg-white/[0.025] p-6 text-center">
@@ -292,7 +311,7 @@ function FavoritesWindowContent({
   }
 
   return (
-    <div className="flex min-h-full flex-col gap-4 pb-2">
+    <div className="flex h-full min-h-0 flex-col gap-4">
       <div className="rounded-3xl border border-purple-300/15 bg-purple-500/10 p-4">
         <p className="text-sm font-semibold text-white">Favorite tracks</p>
         <p className="mt-1 text-xs text-purple-100/45">
@@ -300,47 +319,57 @@ function FavoritesWindowContent({
         </p>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-3 overflow-auto pr-1 noctra-scrollbar">
-        {favoriteTracks.map((track) => (
-          <div
-            key={track.id}
-            className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-3 transition hover:bg-white/[0.07]"
+      <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-purple-100/45 transition focus-within:border-purple-300/35">
+        <Search size={16} />
+
+        <input
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="Search favorite tracks..."
+          className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-purple-100/35"
+        />
+
+        {searchQuery && (
+          <button
+            onClick={() => setSearchQuery("")}
+            className="rounded-full p-1 text-purple-100/35 transition hover:bg-white/10 hover:text-white"
+            title="Clear search"
           >
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-purple-500/35 to-black">
-              <Heart size={18} className="fill-purple-300 text-purple-300" />
-            </div>
+            <X size={14} />
+          </button>
+        )}
+      </div>
 
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-white">
-                {track.title}
+      <div className="min-h-0 flex-1 space-y-3 overflow-auto pr-1 noctra-scrollbar">
+        {filteredFavoriteTracks.length === 0 ? (
+          <div className="flex min-h-48 items-center justify-center rounded-3xl border border-dashed border-purple-300/20 bg-white/[0.025] p-6 text-center">
+            <div>
+              <Heart size={26} className="mx-auto mb-3 text-purple-100/40" />
+
+              <p className="text-sm font-semibold text-white">
+                No favorite tracks found
               </p>
 
-              <p className="truncate text-xs text-purple-100/45">
-                {track.artist} · {track.source}
+              <p className="mt-2 text-xs leading-5 text-purple-100/45">
+                Try another title, artist or source.
               </p>
             </div>
-
-            <span className="text-xs text-purple-100/35">
-              {track.duration}
-            </span>
-
-            <button
-              onClick={() => onPlayTrack(track, favoriteTracks)}
-              className="rounded-full bg-purple-500/25 p-2 text-white transition hover:bg-purple-500/40"
-              title="Play track"
-            >
-              <Play size={15} />
-            </button>
-
-            <button
-              onClick={() => onRemoveFavoriteTrack(track.id)}
-              className="rounded-full bg-red-500/10 p-2 text-red-100/65 transition hover:bg-red-500/20 hover:text-red-100"
-              title="Remove from favorites"
-            >
-              <X size={15} />
-            </button>
           </div>
-        ))}
+        ) : (
+          filteredFavoriteTracks.map((track) => (
+            <TrackRow
+              key={track.id}
+              track={track}
+              queue={filteredFavoriteTracks}
+              isFavorite
+              onPlay={onPlayTrack}
+              onRemove={(trackToRemove) =>
+                onRemoveFavoriteTrack(trackToRemove.id)
+              }
+              removeTitle="Remove from favorites"
+            />
+          ))
+        )}
       </div>
     </div>
   );
@@ -400,33 +429,6 @@ function ProfileWindowContent() {
   );
 }
 
-function TrackCover({
-  track,
-  size = "h-12 w-12",
-}: {
-  track: PlaylistTrack;
-  size?: string;
-}) {
-  return (
-    <div
-      className={`relative ${size} shrink-0 overflow-hidden rounded-xl border border-purple-300/10 bg-black`}
-    >
-      {track.coverUrl ? (
-        <img
-          src={track.coverUrl}
-          alt=""
-          draggable={false}
-          className="absolute inset-0 h-full w-full scale-[1.08] object-cover"
-        />
-      ) : (
-        <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-purple-500/35 to-black">
-          <Music size={18} className="text-purple-100/65" />
-        </div>
-      )}
-    </div>
-  );
-}
-
 function MusicSearchWindowContent({
   playlists,
   onAddTrackToPlaylist,
@@ -438,25 +440,6 @@ function MusicSearchWindowContent({
   onOpenCreatePlaylist: () => void;
   onPlayTrack: (track: PlaylistTrack, queue?: PlaylistTrack[]) => void;
 }) {
-  const [selectedTrack, setSelectedTrack] = useState<PlaylistTrack | null>(null);
-  const [isAddMenuClosing, setIsAddMenuClosing] = useState(false);
-
-  function openAddMenu(track: PlaylistTrack) {
-    setIsAddMenuClosing(false);
-    setSelectedTrack(track);
-  }
-
-  function closeAddMenu() {
-    if (!selectedTrack) return;
-
-    setIsAddMenuClosing(true);
-
-    window.setTimeout(() => {
-      setSelectedTrack(null);
-      setIsAddMenuClosing(false);
-    }, 240);
-  }
-
   const fallbackTracks: PlaylistTrack[] = [
     {
       id: "track-1",
@@ -481,6 +464,11 @@ function MusicSearchWindowContent({
     },
   ];
 
+  const [selectedTrack, setSelectedTrack] = useState<PlaylistTrack | null>(
+    null,
+  );
+  const [isAddMenuClosing, setIsAddMenuClosing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [tracks, setTracks] = useState<PlaylistTrack[]>(fallbackTracks);
   const [isLoadingTelegram, setIsLoadingTelegram] = useState(false);
   const [telegramError, setTelegramError] = useState<string | null>(null);
@@ -508,6 +496,39 @@ function MusicSearchWindowContent({
     loadTelegramTracks(false);
   }, []);
 
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+
+  const filteredTracks = normalizedSearchQuery
+    ? tracks.filter((track) => {
+        const searchableText = [
+          track.title,
+          track.artist,
+          track.source,
+          track.duration,
+        ]
+          .join(" ")
+          .toLowerCase();
+
+        return searchableText.includes(normalizedSearchQuery);
+      })
+    : tracks;
+
+  function openAddMenu(track: PlaylistTrack) {
+    setIsAddMenuClosing(false);
+    setSelectedTrack(track);
+  }
+
+  function closeAddMenu() {
+    if (!selectedTrack) return;
+
+    setIsAddMenuClosing(true);
+
+    window.setTimeout(() => {
+      setSelectedTrack(null);
+      setIsAddMenuClosing(false);
+    }, 240);
+  }
+
   function handleAddTrack(playlistId: string) {
     if (!selectedTrack) return;
 
@@ -517,9 +538,25 @@ function MusicSearchWindowContent({
 
   return (
     <div className="flex h-full flex-col gap-4">
-      <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-purple-100/45">
+      <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-purple-100/45 transition focus-within:border-purple-300/35">
         <Search size={16} />
-        Search tracks, artists or sources...
+
+        <input
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="Search tracks, artists or sources..."
+          className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-purple-100/35"
+        />
+
+        {searchQuery && (
+          <button
+            onClick={() => setSearchQuery("")}
+            className="rounded-full p-1 text-purple-100/35 transition hover:bg-white/10 hover:text-white"
+            title="Clear search"
+          >
+            <X size={14} />
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-2">
@@ -546,119 +583,120 @@ function MusicSearchWindowContent({
         </div>
       )}
 
-      {selectedTrack && (
-        <div
-          className={`rounded-3xl border border-purple-300/20 bg-purple-500/10 p-4 ${
-            isAddMenuClosing
-              ? "animate-[playerMenuOut_240ms_cubic-bezier(0.7,0,0.84,0)_forwards]"
-              : "animate-[playerMenuIn_340ms_cubic-bezier(0.16,1,0.3,1)]"
-            }`}
-          >
-          <div className="mb-3 flex items-start justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-white">
-                Add to playlist
-              </p>
-              <p className="mt-1 text-xs text-purple-100/45">
-                {selectedTrack.title} · {selectedTrack.artist}
-              </p>
-            </div>
+      {selectedTrack &&
+        (() => {
+          const trackToAdd = selectedTrack;
 
-            <button
-              onClick={closeAddMenu}
-              className="rounded-full p-1 text-purple-100/40 transition hover:bg-white/10 hover:text-white"
+          return (
+            <div
+              className={`rounded-3xl border border-purple-300/20 bg-purple-500/10 p-4 ${
+                isAddMenuClosing
+                  ? "animate-[playerMenuOut_240ms_cubic-bezier(0.7,0,0.84,0)_forwards]"
+                  : "animate-[playerMenuIn_340ms_cubic-bezier(0.16,1,0.3,1)]"
+              }`}
             >
-              <X size={15} />
-            </button>
-          </div>
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-white">
+                    Add to playlist
+                  </p>
+                  <p className="mt-1 text-xs text-purple-100/45">
+                    {trackToAdd.title} · {trackToAdd.artist}
+                  </p>
+                </div>
 
-          {playlists.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-purple-300/20 bg-black/25 p-4 text-center">
-              <p className="text-sm text-purple-100/60">
-                You do not have playlists yet.
-              </p>
+                <button
+                  onClick={closeAddMenu}
+                  className="rounded-full p-1 text-purple-100/40 transition hover:bg-white/10 hover:text-white"
+                >
+                  <X size={15} />
+                </button>
+              </div>
 
-              <button
-                onClick={onOpenCreatePlaylist}
-                className="mt-3 rounded-2xl border border-purple-300/20 bg-purple-500/15 px-4 py-2 text-sm text-purple-50 transition hover:bg-purple-500/25"
-              >
-                Create playlist
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-2">
-              {playlists.map((playlist) => {
-                const alreadyAdded = playlist.tracks.some(
-                  (track) => track.id === selectedTrack.id,
-                );
+              {playlists.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-purple-300/20 bg-black/25 p-4 text-center">
+                  <p className="text-sm text-purple-100/60">
+                    You do not have playlists yet.
+                  </p>
 
-                return (
                   <button
-                    key={playlist.id}
-                    onClick={() => handleAddTrack(playlist.id)}
-                    disabled={alreadyAdded}
-                    className={`rounded-2xl border px-3 py-3 text-left text-sm transition ${
-                      alreadyAdded
-                        ? "cursor-not-allowed border-white/10 bg-white/[0.03] text-purple-100/30"
-                        : "border-purple-300/15 bg-black/25 text-purple-50 hover:bg-purple-500/20"
-                    }`}
+                    onClick={onOpenCreatePlaylist}
+                    className="mt-3 rounded-2xl border border-purple-300/20 bg-purple-500/15 px-4 py-2 text-sm text-purple-50 transition hover:bg-purple-500/25"
                   >
-                    <span className="block truncate font-semibold">
-                      {playlist.name}
-                    </span>
-
-                    <span className="mt-1 block text-xs text-purple-100/40">
-                      {alreadyAdded
-                        ? "Already added"
-                        : `${playlist.tracks.length} tracks`}
-                    </span>
+                    Create playlist
                   </button>
-                );
-              })}
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  {playlists.map((playlist) => {
+                    const alreadyAdded = playlist.tracks.some(
+                      (track) => track.id === trackToAdd.id,
+                    );
+
+                    return (
+                      <div
+                        key={playlist.id}
+                        className={`flex items-center justify-between gap-3 rounded-2xl border px-3 py-3 text-sm transition ${
+                          alreadyAdded
+                            ? "border-white/10 bg-white/[0.03] text-purple-100/30"
+                            : "border-purple-300/15 bg-black/25 text-purple-50 hover:bg-purple-500/10"
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <span className="block truncate font-semibold">
+                            {playlist.name}
+                          </span>
+
+                          <span className="mt-1 block text-xs text-purple-100/40">
+                            {alreadyAdded
+                              ? "Already added"
+                              : `${playlist.tracks.length} tracks`}
+                          </span>
+                        </div>
+
+                        <button
+                          onClick={() => handleAddTrack(playlist.id)}
+                          disabled={alreadyAdded}
+                          className="shrink-0 rounded-xl border border-purple-300/20 bg-purple-500/15 px-3 py-2 text-xs text-purple-50 transition hover:bg-purple-500/25 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {alreadyAdded ? "Added" : "Add"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          )}
-        </div>
-      )}
+          );
+        })()}
 
       <div className="min-h-0 flex-1 space-y-3 overflow-auto pr-1 noctra-scrollbar">
-        {tracks.map((track) => (
-          <div
-            key={track.id}
-            className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-3 transition hover:bg-white/[0.07]"
-          >
-            <TrackCover track={track} />
+        {filteredTracks.length === 0 ? (
+          <div className="flex min-h-48 items-center justify-center rounded-3xl border border-dashed border-purple-300/20 bg-white/[0.025] p-6 text-center">
+            <div>
+              <Music size={26} className="mx-auto mb-3 text-purple-100/40" />
 
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-white">
-                {track.title}
+              <p className="text-sm font-semibold text-white">
+                No tracks found
               </p>
 
-              <p className="truncate text-xs text-purple-100/45">
-                {track.artist} · {track.source}
+              <p className="mt-2 text-xs leading-5 text-purple-100/45">
+                Try another title, artist or source.
               </p>
             </div>
-
-            <span className="text-xs text-purple-100/35">
-              {track.duration}
-            </span>
-
-            <button 
-              onClick={() => onPlayTrack(track, tracks)}
-              className="rounded-full bg-purple-500/25 p-2 text-white transition hover:bg-purple-500/40"
-              title="Play track"
-            >
-              <Play size={15} />
-            </button>
-
-            <button
-              onClick={() => openAddMenu(track)}
-              className="rounded-full bg-purple-500/15 p-2 text-purple-100 transition hover:bg-purple-500/30 hover:text-white"
-              title="Add to playlist"
-            >
-              <Plus size={15} />
-            </button>
           </div>
-        ))}
+        ) : (
+          filteredTracks.map((track) => (
+            <TrackRow
+              key={track.id}
+              track={track}
+              queue={filteredTracks}
+              onPlay={onPlayTrack}
+              onAdd={openAddMenu}
+              addTitle="Add to playlist"
+            />
+          ))
+        )}
       </div>
     </div>
   );
@@ -673,11 +711,46 @@ function PlaylistsWindowContent({
   onOpenCreate: () => void;
   onOpenPlaylistDetails: (playlistId: string) => void;
 }) {
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+
+  const filteredPlaylists = normalizedSearchQuery
+    ? playlists.filter((playlist) => {
+        const searchableText = [
+          playlist.name,
+          playlist.description,
+          playlist.privacy,
+          `${playlist.tracks.length} tracks`,
+        ]
+          .join(" ")
+          .toLowerCase();
+
+        return searchableText.includes(normalizedSearchQuery);
+      })
+    : playlists;
+
   return (
     <div className="flex h-full flex-col gap-3">
-      <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-purple-100/45">
+      <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-purple-100/45 transition focus-within:border-purple-300/35">
         <Search size={16} />
-        Search playlists...
+
+        <input
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="Search playlists..."
+          className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-purple-100/35"
+        />
+
+        {searchQuery && (
+          <button
+            onClick={() => setSearchQuery("")}
+            className="rounded-full p-1 text-purple-100/35 transition hover:bg-white/10 hover:text-white"
+            title="Clear search"
+          >
+            <X size={14} />
+          </button>
+        )}
       </div>
 
       <button
@@ -705,13 +778,29 @@ function PlaylistsWindowContent({
             </p>
           </div>
         </div>
+      ) : filteredPlaylists.length === 0 ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center rounded-3xl border border-dashed border-purple-300/20 bg-white/[0.025] p-6 text-center">
+          <div>
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-purple-300/20 bg-purple-500/15">
+              <ListMusic size={24} />
+            </div>
+
+            <h3 className="text-lg font-semibold text-white">
+              No playlists found
+            </h3>
+
+            <p className="mt-2 max-w-xs text-sm leading-6 text-purple-100/45">
+              Try another playlist name, description or privacy type.
+            </p>
+          </div>
+        </div>
       ) : (
         <div className="min-h-0 flex-1 space-y-3 overflow-auto pr-1 noctra-scrollbar">
-          {playlists.map((playlist) => (
+          {filteredPlaylists.map((playlist) => (
             <button
               key={playlist.id}
               onClick={() => onOpenPlaylistDetails(playlist.id)}
-              className="flex gap-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4 transition hover:bg-white/[0.07]"
+              className="flex w-full gap-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-left transition hover:border-purple-300/25 hover:bg-white/[0.07]"
             >
               <div className="h-20 w-20 shrink-0 overflow-hidden rounded-2xl border border-purple-300/15 bg-gradient-to-br from-purple-500/35 to-black">
                 {playlist.cover && (
@@ -1027,44 +1116,16 @@ function PlaylistDetailsWindowContent({
         ) : (
           <div className="space-y-2">
             {playlist.tracks.map((track) => (
-              <div
+              <TrackRow
                 key={track.id}
-                className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-3"
-              >
-                <TrackCover track={track} size="h-11 w-11" />
-
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-white">
-                    {track.title}
-                  </p>
-
-                  <p className="truncate text-xs text-purple-100/45">
-                    {track.artist} · {track.source}
-                  </p>
-                </div>
-
-                <span className="text-xs text-purple-100/35">
-                  {track.duration}
-                </span>
-
-                <button 
-                  onClick={() => onPlayTrack(track, playlist.tracks)}
-                  className="rounded-full bg-purple-500/25 p-2 text-white transition hover:bg-purple-500/40"
-                  title="Play track"
-                >
-                  <Play size={15} />
-                </button>
-
-                <button
-                  onClick={() =>
-                    onRemoveTrackFromPlaylist(playlist.id, track.id)
-                  }
-                  className="rounded-full bg-red-500/10 p-2 text-red-100/65 transition hover:bg-red-500/20 hover:text-red-100"
-                  title="Remove from playlist"
-                >
-                  <Trash2 size={15} />
-                </button>
-              </div>
+                track={track}
+                queue={playlist.tracks}
+                onPlay={onPlayTrack}
+                onRemove={(trackToRemove) =>
+                  onRemoveTrackFromPlaylist(playlist.id, trackToRemove.id)
+                }
+                removeTitle="Remove from playlist"
+              />
             ))}
           </div>
         )}

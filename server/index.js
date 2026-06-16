@@ -2,6 +2,8 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { Readable } from "node:stream";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 dotenv.config();
 
@@ -20,6 +22,28 @@ const TELEGRAM_FILE_API = `https://api.telegram.org/file/bot${BOT_TOKEN}`;
 
 let lastUpdateId = 0;
 let telegramTracks = [];
+
+const DATA_DIR = path.join(process.cwd(), "data");
+const TRACKS_FILE = path.join(DATA_DIR, "telegram-tracks.json");
+
+async function loadStoredTelegramTracks() {
+  try {
+    const fileContent = await fs.readFile(TRACKS_FILE, "utf-8");
+    telegramTracks = JSON.parse(fileContent);
+    console.log(`Loaded ${telegramTracks.length} stored Telegram tracks`);
+  } catch {
+    telegramTracks = [];
+  }
+}
+
+async function saveTelegramTracks() {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  await fs.writeFile(
+    TRACKS_FILE,
+    JSON.stringify(telegramTracks, null, 2),
+    "utf-8",
+  );
+}
 
 app.use(
   cors({
@@ -158,6 +182,7 @@ async function syncTelegramUpdates() {
 
     if (!alreadyExists) {
       telegramTracks = [track, ...telegramTracks];
+      await saveTelegramTracks();
     }
   }
 
@@ -278,6 +303,8 @@ app.get("/api/telegram/file", async (req, res) => {
     });
   }
 });
+
+await loadStoredTelegramTracks();
 
 app.listen(PORT, () => {
   console.log(`Noctra Telegram server running on http://localhost:${PORT}`);
