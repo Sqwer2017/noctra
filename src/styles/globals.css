@@ -19,6 +19,22 @@
   --color-purple-800: var(--accent-deep);
   --color-purple-900: var(--accent-deep);
   --color-purple-950: var(--accent-deep);
+
+  /*
+   * Анимации фоновых бликов.
+   *
+   * В Tailwind 4 конфигурация живёт здесь, в @theme: файл tailwind.config.js
+   * больше не читается. Токены --animate-* дают утилиты animate-float-slow,
+   * animate-float-reverse и animate-pulse-slow.
+   *
+   * Длительности 14–24 с и ease-in-out — сферы должны «дышать» почти незаметно.
+   * Сами @keyframes объявлены ниже по файлу.
+   */
+  --animate-float-slow: float-slow 18s ease-in-out infinite;
+  --animate-float-reverse: float-reverse 24s ease-in-out infinite;
+  --animate-pulse-slow: pulse-slow 14s ease-in-out infinite;
+  --animate-drift-wide: drift-wide 21s ease-in-out infinite;
+  --animate-glow-breathe: glow-breathe 16s ease-in-out infinite;
 }
 
 :root {
@@ -257,4 +273,213 @@ textarea {
 
 .noctra-range:disabled {
   opacity: 0.35;
+}
+/* ── Фоновые блики (AmbientBackground) ────────────────────────────────
+   Анимируются ТОЛЬКО transform и opacity: оба свойства обрабатываются
+   композитором на GPU, без пересчёта layout и перерисовки слоёв.
+   Статичный blur остаётся неизменным — анимировать его было бы очень
+   дорого (браузер пересчитывал бы размытие каждый кадр). */
+
+@keyframes float-slow {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  50% {
+    transform: translate3d(40px, 60px, 0) scale(1.1);
+  }
+}
+
+@keyframes float-reverse {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1.05);
+  }
+
+  50% {
+    transform: translate3d(-50px, -40px, 0) scale(0.95);
+  }
+}
+
+@keyframes pulse-slow {
+  0%,
+  100% {
+    opacity: 0.15;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  50% {
+    opacity: 0.28;
+    transform: translate3d(0, 0, 0) scale(1.15);
+  }
+}
+
+/* Четвёртая сфера: широкая горизонтальная траектория. */
+@keyframes drift-wide {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  33% {
+    transform: translate3d(-70px, 30px, 0) scale(1.08);
+  }
+
+  66% {
+    transform: translate3d(50px, -35px, 0) scale(0.96);
+  }
+}
+
+/* Центральное свечение: «дыхание» яркости акцента.
+   Двигаем только opacity и scale — композитор, без перерисовки. */
+@keyframes glow-breathe {
+  0%,
+  100% {
+    opacity: 0.22;
+    transform: translate3d(-50%, -50%, 0) scale(0.92);
+  }
+
+  50% {
+    opacity: 0.42;
+    transform: translate3d(-50%, -50%, 0) scale(1.12);
+  }
+}
+
+/* ── Страница входа: фоновые анимации ─────────────────────────────────
+   Все эффекты построены на transform/opacity, чтобы не дёргать layout
+   и не нагружать композитор. Длительности намеренно медленные —
+   фон должен «дышать», а не отвлекать от формы. */
+
+@keyframes auroraDrift {
+  0% {
+    transform: translate3d(-4%, -2%, 0) scale(1);
+    opacity: 0.55;
+  }
+
+  50% {
+    transform: translate3d(4%, 3%, 0) scale(1.12);
+    opacity: 0.8;
+  }
+
+  100% {
+    transform: translate3d(-4%, -2%, 0) scale(1);
+    opacity: 0.55;
+  }
+}
+
+@keyframes logoFloat {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes logoPulse {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.94);
+  }
+
+  50% {
+    opacity: 0.85;
+    transform: scale(1.06);
+  }
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Отклик на неудачный вход: короткая «отмашка» карточки. */
+@keyframes shakeError {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  15% {
+    transform: translateX(-9px);
+  }
+
+  30% {
+    transform: translateX(8px);
+  }
+
+  45% {
+    transform: translateX(-6px);
+  }
+
+  60% {
+    transform: translateX(4px);
+  }
+
+  80% {
+    transform: translateX(-2px);
+  }
+}
+
+.auth-aurora {
+  animation: auroraDrift 18s ease-in-out infinite;
+}
+
+.auth-logo-float {
+  animation: logoFloat 6s ease-in-out infinite;
+}
+
+.auth-logo-pulse {
+  animation: logoPulse 4.5s ease-in-out infinite;
+}
+
+.auth-fade-up {
+  animation: fadeUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.auth-shake {
+  animation: shakeError 0.5s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+/* ── Доступность: уважаем системную настройку «меньше движения» ───────
+   Отключаем декоративные анимации, но оставляем смену состояний
+   мгновенной, чтобы интерфейс оставался понятным. */
+@media (prefers-reduced-motion: reduce) {
+  .auth-aurora,
+  .auth-logo-float,
+  .auth-logo-pulse,
+  .auth-fade-up,
+  .auth-shake {
+    animation: none;
+  }
+
+  /* Фоновые блики остаются видимыми, но перестают двигаться: */
+  /* так сохраняется атмосфера без мельтешения на периферии зрения. */
+  .animate-float-slow,
+  .animate-float-reverse,
+  .animate-pulse-slow,
+  .animate-drift-wide,
+  .animate-glow-breathe {
+    animation: none !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -7,7 +7,7 @@ import { GoogleAuthModal } from "./components/auth/GoogleAuthModal";
 import { ToastViewport } from "./components/ui/Toast";
 import { nickToHandle } from "./lib/profile";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
-import { signOut } from "./lib/supabase/auth";
+import { signOut } from "./services/auth";
 import { flushSyncQueue, watchConnectivity } from "./lib/supabase/sync";
 import { ensureProfileFromAuthMetadata } from "./lib/supabase/profile";
 import { disableGoogleAutoSelect } from "./lib/google";

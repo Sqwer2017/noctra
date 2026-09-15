@@ -59,8 +59,6 @@ const ru = {
   "auth.modal.title": "Вход в Noctra",
   "auth.modal.subtitle":
     "Войди, чтобы прогресс, избранное и плейлисты сохранялись в облаке и были доступны с любого устройства.",
-  "auth.modal.notConfigured":
-    "Supabase не настроен: данные сохраняются только в этом браузере.",
   "auth.signInWithGoogle": "Войти через Google",
   "auth.close": "Закрыть",
 
@@ -81,6 +79,23 @@ const ru = {
   "login.telegram": "Продолжить через Telegram",
   "login.or": "или",
   "login.guest": "Войти как гость",
+  "login.welcomeBack": "С возвращением",
+  "login.welcomeBack.body": "Войди, чтобы продолжить слушать",
+  "login.createTitle": "Создать аккаунт",
+  "login.createTitle.body": "Пара шагов — и ты в тёмном фэнтези",
+  "login.success": "Готово",
+  "login.strength.weak": "Слабый",
+  "login.strength.medium": "Средний",
+  "login.strength.strong": "Надёжный",
+  "login.feature.ranks": "Ранги и опыт",
+  "login.feature.ranks.body":
+    "Слушай музыку, выполняй ежедневные квесты и расти от новичка до божества.",
+  "login.feature.library": "Своя библиотека",
+  "login.feature.library.body":
+    "Избранное, плейлисты и очередь — всё под рукой, с поиском по Telegram и Audius.",
+  "login.feature.sync": "Синхронизация",
+  "login.feature.sync.body":
+    "Прогресс сохраняется в облаке и доступен с любого устройства.",
   "login.subtitle.note":
     "Войди в своё тёмное фэнтези-музыкальное пространство. Кастомизация профиля, модульные окна и социальные функции готовятся к MVP.",
   "login.nick.required": "Придумай никнейм, чтобы продолжить",

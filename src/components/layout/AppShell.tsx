@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { Background } from "./Background";
+import { AmbientBackground } from "../common/AmbientBackground";
 import { BottomPlayer } from "./BottomPlayer";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
@@ -218,8 +218,8 @@ const isCurrentTrackFavorite = currentTrack
   : false;
 
   return (
-    <main className="relative h-screen w-screen overflow-hidden bg-[#05040a] text-white">
-      <Background />
+    <main className="relative h-screen w-screen overflow-hidden bg-[#08080a] text-white">
+      <AmbientBackground />
 
       <div
         className={`relative z-10 grid h-screen max-h-screen gap-4 overflow-hidden p-4 transition-[grid-template-columns] duration-500 ease-out ${

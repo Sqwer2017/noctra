@@ -55,8 +55,6 @@ const en = {
   "auth.modal.title": "Sign in to Noctra",
   "auth.modal.subtitle":
     "Sign in to keep your progress, favorites and playlists in the cloud and available on any device.",
-  "auth.modal.notConfigured":
-    "Supabase is not configured: data is stored in this browser only.",
   "auth.signInWithGoogle": "Continue with Google",
   "auth.close": "Close",
 
@@ -75,6 +73,23 @@ const en = {
   "login.telegram": "Continue with Telegram",
   "login.or": "or",
   "login.guest": "Continue as guest",
+  "login.welcomeBack": "Welcome back",
+  "login.welcomeBack.body": "Sign in to keep listening",
+  "login.createTitle": "Create an account",
+  "login.createTitle.body": "A couple of steps into the dark fantasy",
+  "login.success": "Done",
+  "login.strength.weak": "Weak",
+  "login.strength.medium": "Medium",
+  "login.strength.strong": "Strong",
+  "login.feature.ranks": "Ranks and XP",
+  "login.feature.ranks.body":
+    "Listen, complete daily quests and climb from newcomer to deity.",
+  "login.feature.library": "Your own library",
+  "login.feature.library.body":
+    "Favorites, playlists and the queue — with search across Telegram and Audius.",
+  "login.feature.sync": "Cloud sync",
+  "login.feature.sync.body":
+    "Your progress is saved in the cloud and available on any device.",
   "login.subtitle.note":
     "Enter your dark fantasy music space. Profile customization, modular windows and social features are prepared for the MVP.",
   "login.nick.required": "Choose a nickname to continue",

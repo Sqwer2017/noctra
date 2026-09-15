@@ -102,9 +102,12 @@ type ProgressionState = {
   addXp: (amount: number) => void;
   /** Тик прослушивания: +1 сек; каждые 300 сек даёт +1 XP. */
   tickListening: (seconds: number) => void;
-  /** Инкремент «треков прослушано» (при старте/переключении трека). */
-  registerTrackPlayed: () => void;
-  /** Полное прослушивание трека (onEnded) — для квеста «Ночной марафон». */
+  /**
+   * Трек доигран до конца (onEnded).
+   *
+   * Единственный источник счётчика «треков прослушано» и прогресса квеста
+   * «Ночной марафон»: переключения и паузы в статистику не попадают.
+   */
   registerTrackCompleted: () => void;
   /** Добавление в избранное: квест + XP (с дневным лимитом). */
   registerFavoriteAdded: () => void;
@@ -251,23 +254,27 @@ export const useProgressionStore = create<ProgressionState>()(
         scheduleCloudSync();
       },
 
-      registerTrackPlayed: () => {
-        get().rolloverIfNeeded();
-        set((state) => ({
-          totalTracksPlayed: state.totalTracksPlayed + 1,
-        }));
-        scheduleCloudSync();
-      },
-
       registerTrackCompleted: () => {
         get().rolloverIfNeeded();
+
+        /*
+         * Полное прослушивание увеличивает и общий счётчик «треков прослушано»
+         * (`total_tracks_played` в user_stats), и дневной прогресс квеста.
+         *
+         * Это единственное место, где растёт totalTracksPlayed: раньше счётчик
+         * увеличивался ещё и при старте трека, из-за чего в статистику попадали
+         * переключения, а не прослушивания.
+         */
         set((state) => ({
+          totalTracksPlayed: state.totalTracksPlayed + 1,
           daily: {
             ...state.daily,
             completedTracks: state.daily.completedTracks + 1,
           },
         }));
+
         void syncQuestProgress("nightMarathon");
+        scheduleCloudSync();
       },
 
       registerFavoriteAdded: () => {
