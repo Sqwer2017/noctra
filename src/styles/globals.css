@@ -1,0 +1,260 @@
+@import "tailwindcss";
+
+/*
+ * Акцентная тема.
+ * Перекрываем палитру Tailwind "purple-*" акцентными переменными — тогда
+ * весь интерфейс (bg-purple-500, text-purple-200, border-purple-300/20 и т.д.)
+ * перекрашивается одним изменением --accent*. Конкретные значения приходят
+ * inline из JS (applyAccent), ниже — дефолт «неоновый фиолетовый».
+ */
+@theme {
+  --color-purple-50: var(--accent-text);
+  --color-purple-100: var(--accent-text);
+  --color-purple-200: var(--accent-soft);
+  --color-purple-300: var(--accent-soft);
+  --color-purple-400: var(--accent);
+  --color-purple-500: var(--accent);
+  --color-purple-600: var(--accent-strong);
+  --color-purple-700: var(--accent-strong);
+  --color-purple-800: var(--accent-deep);
+  --color-purple-900: var(--accent-deep);
+  --color-purple-950: var(--accent-deep);
+}
+
+:root {
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  color: #f4f1ff;
+  background: #05040a;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  /* Дефолтная акцентная палитра (неоновый фиолетовый). */
+  --accent: #a855f7;
+  --accent-soft: #d8b4fe;
+  --accent-strong: #7e22ce;
+  --accent-deep: #3b0764;
+  --accent-glow: rgba(168, 85, 247, 0.55);
+  --accent-border: rgba(216, 180, 254, 0.35);
+  --accent-text: #f5f3ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+/* ── Минималистичные скроллбары ──────────────────────────────────────
+ * Тонкая (5px) полоска, невидимый трек, скруглённый полупрозрачный thumb,
+ * который окрашивается в акцент и ярче при наведении.
+ */
+.noctra-scrollbar::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+.noctra-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.noctra-scrollbar::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 9999px;
+}
+
+.noctra-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+/* Firefox (в т.ч. тонкие скроллбары) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--accent) 45%, transparent) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+@keyframes windowIn {
+  from {
+    opacity: 0;
+    transform: translateX(-34px) scale(0.975);
+    filter: blur(5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes windowOut {
+  from {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: blur(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateX(-34px) scale(0.975);
+    filter: blur(5px);
+  }
+}
+
+@keyframes playerIn {
+  from {
+    opacity: 0;
+    transform: translateY(32px) scale(0.975);
+    filter: blur(5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes playerOut {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(32px) scale(0.975);
+    filter: blur(5px);
+  }
+}
+
+@keyframes playerMenuIn {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.975);
+    filter: blur(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes playerMenuOut {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(18px) scale(0.975);
+    filter: blur(4px);
+  }
+}
+
+/* Мини-эквалайзер у активного трека */
+@keyframes eqBar {
+  0% {
+    height: 20%;
+  }
+  100% {
+    height: 100%;
+  }
+}
+
+.noctra-range {
+  --range-progress: 0%;
+  appearance: none;
+  height: 6px;
+  border-radius: 9999px;
+  background: linear-gradient(
+    to right,
+    var(--accent-soft) 0%,
+    var(--accent-soft) var(--range-progress),
+    rgba(255, 255, 255, 0.1) var(--range-progress),
+    rgba(255, 255, 255, 0.1) 100%
+  );
+  outline: none;
+}
+
+.noctra-range::-webkit-slider-thumb {
+  appearance: none;
+  height: 14px;
+  width: 14px;
+  border-radius: 9999px;
+  border: 2px solid var(--accent);
+  background: rgba(250, 245, 255, 0.98);
+  box-shadow: 0 0 18px var(--accent-glow);
+  opacity: 0;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+
+.noctra-range:hover::-webkit-slider-thumb {
+  opacity: 1;
+  transform: scale(1.05);
+}
+
+.noctra-range::-moz-range-thumb {
+  height: 14px;
+  width: 14px;
+  border-radius: 9999px;
+  border: 2px solid var(--accent);
+  background: rgba(250, 245, 255, 0.98);
+  box-shadow: 0 0 18px var(--accent-glow);
+  opacity: 0;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+
+.noctra-range:hover::-moz-range-thumb {
+  opacity: 1;
+  transform: scale(1.05);
+}
+
+.noctra-range:disabled {
+  opacity: 0.35;
+}
