@@ -2,12 +2,13 @@
  * Google Identity Services (One Tap).
  *
  * Скрипт `accounts.google.com/gsi/client` подключён в index.html. Здесь —
- * типобезопасная обёртка: загрузка, инициализация и получение idToken.
+ * типобезопасная обёртка: загрузка, инициализация и получение idToken
+ * вместе с nonce, который обязательно нужен Supabase для проверки токена.
  *
- * Важно: если Client ID не задан, скрипт не загрузился (блокировщик,
- * офлайн) или Google не ответил — все функции возвращают null/отказ.
- * Вызывающий код в этом случае уходит на редирект-вариант OAuth, поэтому
- * вход через Google работает в любом случае.
+ * Если Client ID не задан, скрипт не загрузился (блокировщик, офлайн) или
+ * Google не ответил — функции возвращают отказ, а UI показывает понятную
+ * ошибку. Никаких тихих подмен на другие способы входа: человек должен
+ * понимать, каким аккаунтом он входит.
  */
 
 /** OAuth Client ID из Google Cloud Console (тип Web). */
@@ -15,7 +16,7 @@ export const GOOGLE_CLIENT_ID = (
   import.meta.env.VITE_GOOGLE_CLIENT_ID ?? ""
 ).trim();
 
-/** Настроен ли One Tap. Без Client ID используем редирект-флоу. */
+/** Настроен ли One Tap (задан Client ID). */
 export const isGoogleOneTapConfigured = Boolean(GOOGLE_CLIENT_ID);
 
 type GoogleCredentialResponse = {
@@ -29,6 +30,8 @@ type GoogleAccountsId = {
     auto_select?: boolean;
     cancel_on_tap_outside?: boolean;
     use_fedcm_for_prompt?: boolean;
+    /** Nonce, который Google встроит в id_token для защиты от повтора. */
+    nonce?: string;
   }) => void;
   prompt: (
     momentListener?: (notification: {
@@ -39,6 +42,56 @@ type GoogleAccountsId = {
   ) => void;
   disableAutoSelect?: () => void;
 };
+
+/** Результат входа: токен и nonce, с которым он был выдан. */
+export type GoogleIdTokenResult = {
+  idToken: string;
+  /** Сырой (нехешированный) nonce — именно его ждёт Supabase. */
+  nonce: string;
+};
+
+/**
+ * Генерирует одноразовый nonce.
+ *
+ * Значение должно быть криптостойким — берём из Web Crypto.
+ */
+function generateNonce(): string {
+  const bytes = new Uint8Array(32);
+
+  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+    crypto.getRandomValues(bytes);
+  } else {
+    // Крайне старые браузеры: Math.random слабее, но nonce здесь
+    // одноразовый и живёт секунды — это приемлемый компромисс.
+    for (let i = 0; i < bytes.length; i++) {
+      bytes[i] = Math.floor(Math.random() * 256);
+    }
+  }
+
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
+    "",
+  );
+}
+
+/**
+ * Считает SHA-256 от nonce.
+ *
+ * ВАЖНО ПО МЕХАНИКЕ NONCE (иначе вход падает с ошибкой проверки):
+ *  1. Google встраивает в id_token именно ХЕШ переданного ему nonce;
+ *  2. Supabase, получив СЫРОЙ nonce, хеширует его сам и сверяет с токеном.
+ *
+ * Поэтому в Google уходит хеш, а в Supabase — сырое значение. Если отправить
+ * в Google сырой nonce, получится SHA256(SHA256(nonce)) против SHA256(nonce)
+ * — проверка не сойдётся.
+ */
+async function hashNonce(nonce: string): Promise<string> {
+  const encoded = new TextEncoder().encode(nonce);
+  const digest = await crypto.subtle.digest("SHA-256", encoded);
+
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+}
 
 type GoogleNamespace = {
   accounts?: {
@@ -81,41 +134,66 @@ function waitForGoogleSdk(timeoutMs = 6000): Promise<GoogleAccountsId | null> {
   });
 }
 
-let isInitialized = false;
-
 /**
- * Показывает One Tap. Возвращает idToken или null, если Google не предложил
- * вход (не настроен, отклонён пользователем, скрипт недоступен).
+ * Показывает One Tap и возвращает id-токен вместе с nonce.
+ *
+ * Nonce генерируется здесь, передаётся в Google (он встраивает его в токен)
+ * и возвращается вызывающему — тот обязан передать его же в Supabase,
+ * иначе проверка не сойдётся и вход будет отклонён.
+ *
+ * `null` означает, что вход не состоялся: не настроен Client ID, скрипт
+ * недоступен, окно закрыто пользователем.
  */
-export async function requestGoogleIdToken(): Promise<string | null> {
+export async function requestGoogleIdToken(): Promise<GoogleIdTokenResult | null> {
   if (!isGoogleOneTapConfigured) return null;
 
   const sdk = await waitForGoogleSdk();
   if (!sdk) return null;
 
+  /*
+   * Nonce создаётся заново на каждую попытку входа: он одноразовый.
+   * Кэшировать его нельзя — Google отклонит повторное использование.
+   */
+  const nonce = generateNonce();
+
+  /*
+   * В Google уходит ХЕШ nonce, в Supabase потом уйдёт сырое значение.
+   * Это требование связки Google + Supabase: подробности в комментарии
+   * к hashNonce выше.
+   */
+  const hashedNonce = await hashNonce(nonce);
+
   return new Promise((resolve) => {
     let settled = false;
 
-    const finish = (token: string | null) => {
+    const finish = (result: GoogleIdTokenResult | null) => {
       if (settled) return;
       settled = true;
       window.clearTimeout(timer);
-      resolve(token);
+      resolve(result);
     };
 
     // Страховка: если Google не вызовет ни callback, ни momentListener.
     const timer = window.setTimeout(() => finish(null), 12_000);
 
-    if (!isInitialized) {
-      sdk.initialize({
-        client_id: GOOGLE_CLIENT_ID,
-        callback: (response) => finish(response.credential ?? null),
-        auto_select: false,
-        cancel_on_tap_outside: true,
-        use_fedcm_for_prompt: true,
-      });
-      isInitialized = true;
-    }
+    /*
+     * initialize вызывается на каждую попытку, а не один раз за сессию:
+     * nonce меняется, а Google берёт его из конфигурации в момент вызова.
+     * Повторная инициализация с тем же client_id безопасна.
+     */
+    sdk.initialize({
+      client_id: GOOGLE_CLIENT_ID,
+      // Именно хеш: Google встроит его в токен, и Supabase сверит со своим.
+      nonce: hashedNonce,
+      callback: (response) => {
+        const credential = response.credential;
+        // Возвращаем СЫРОЙ nonce — его ждёт signInWithIdToken.
+        finish(credential ? { idToken: credential, nonce } : null);
+      },
+      auto_select: false,
+      cancel_on_tap_outside: true,
+      use_fedcm_for_prompt: true,
+    });
 
     sdk.prompt((notification) => {
       if (notification.isNotDisplayed?.() || notification.isSkippedMoment?.()) {

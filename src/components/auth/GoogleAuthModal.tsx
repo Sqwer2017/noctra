@@ -73,12 +73,7 @@ export function GoogleAuthModal({
         return;
       }
 
-      // При редиректе страница перезагрузится сама — просто гасим спиннер.
-      if (result.redirected) {
-        onClose();
-        return;
-      }
-
+      // One Tap входит нативно, без перезагрузки страницы.
       onAuthenticated();
       onClose();
     } finally {

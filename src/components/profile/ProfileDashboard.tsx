@@ -4,7 +4,6 @@ import { AnimatePresence, motion } from "motion/react";
 import {
   BadgeCheck,
   Headphones,
-  Lock,
   MoreHorizontal,
   Pause,
   Pencil,
@@ -20,20 +19,28 @@ import {
 import { useAppStore } from "../../store/useAppStore";
 import { usePlayerStore } from "../../store/usePlayerStore";
 import { useProgressionStore } from "../../store/useProgressionStore";
+import { useLibraryStore } from "../../store/useLibraryStore";
 import { useT } from "../../i18n/useT";
 import { TrackCover } from "../tracks/TrackCover";
 import type { PlaylistTrack } from "../../types/playlist";
 import {
-  achievementsTotal,
-  achievementsUnlocked,
-  profileAchievements,
-} from "../../data/profileRpg";
-import type { AchievementRarity } from "../../data/profileRpg";
+  getAchievementProgress,
+  getMetricValue,
+} from "../../lib/achievements";
+import type { AchievementMetrics } from "../../lib/achievements";
+import {
+  useAchievementsStore,
+  useAchievementsSummary,
+  useAchievementsWithState,
+} from "../../store/useAchievementsStore";
+import { AchievementTile } from "./AchievementTile";
 import { formatListeningTime } from "../../lib/format";
-import { getRankProgress } from "../../lib/ranks";
+import { getRankByXp, getRankProgress } from "../../lib/ranks";
 import { getFrequencyLevels, resumeAnalyser } from "../../audio/analyser";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { uploadProfileImage, UploadError } from "../../lib/supabase/storage";
+import { ProfileError } from "../../lib/supabase/profile";
+import { toast } from "../ui/Toast";
 import { ListeningStatsModal } from "./ListeningStatsModal";
 import { DailyQuests } from "./DailyQuests";
 import { RankIcon } from "./RankIcon";
@@ -42,13 +49,6 @@ type ProfileDashboardProps = {
   isOpen: boolean;
   onClose: () => void;
   favoriteCount: number;
-};
-
-const RARITY_GLOW: Record<AchievementRarity, number> = {
-  common: 0.25,
-  rare: 0.45,
-  epic: 0.7,
-  legendary: 1,
 };
 
 export function ProfileDashboard({
@@ -120,7 +120,22 @@ export function ProfileDashboard({
                 coverUrl={coverUrl}
                 status={profile?.status ?? ""}
                 bio={profile?.bio ?? ""}
-                onSave={(next) => void updateProfile(next)}
+                onSave={(next) => {
+                  /*
+                   * Тег уникален в базе: если его занял другой человек,
+                   * репозиторий бросает ProfileError с кодом. Показываем
+                   * понятный текст вместо «duplicate key violates constraint».
+                   */
+                  void updateProfile(next).catch((error: unknown) => {
+                    const code =
+                      error instanceof ProfileError ? error.code : null;
+                    toast(
+                      code === "tag_taken"
+                        ? t("profile.error.tagTaken")
+                        : t("profile.error.saveFailed"),
+                    );
+                  });
+                }}
               />
 
               <NowPlayingWidget />
@@ -1047,49 +1062,89 @@ function DeltaBadge({
 function AchievementsGrid() {
   const { t } = useT();
 
+  // Достижения приходят из базы; выдача происходит в SQL-триггере.
+  const achievements = useAchievementsWithState();
+  const { unlockedCount, total } = useAchievementsSummary();
+  const isExpanded = useAchievementsStore((s) => s.isExpanded);
+  const setExpanded = useAchievementsStore((s) => s.setExpanded);
+
+  /*
+   * Показываем первые 6 плиток, остальные — по кнопке.
+   *
+   * Двадцать достижений в профиле занимают слишком много места и отодвигают
+   * статистику. Компактная витрина + «показать все» сохраняет и обзор,
+   * и доступ к полному списку.
+   */
+  const VISIBLE_COUNT = 6;
+  const visible = isExpanded ? achievements : achievements.slice(0, VISIBLE_COUNT);
+  const hiddenCount = achievements.length - VISIBLE_COUNT;
+
+  // Прогресс считаем от тех же данных, что и статистика в профиле.
+  const totalTracksPlayed = useProgressionStore((s) => s.totalTracksPlayed);
+  const rankTier = useProgressionStore((s) => getRankByXp(s.totalXP).tier);
+  const historyMap = useProgressionStore((s) => s.historyMap);
+  const favoriteCount = useLibraryStore((s) => s.favoriteTracks.length);
+  const playlists = useLibraryStore((s) => s.playlists);
+
+  const metrics: AchievementMetrics = {
+    tracksTotal: totalTracksPlayed,
+    favoritesTotal: favoriteCount,
+    playlistsTotal: playlists.length,
+    playlistTracks: playlists.reduce(
+      (max: number, playlist) => Math.max(max, playlist.tracks.length),
+      0,
+    ),
+    // Стрик — число дней с активностью; точное значение приходит из базы,
+    // здесь для прогресс-бара достаточно количества записей в истории.
+    streakDays: Object.keys(historyMap).length,
+    questsClaimed: unlockedCount,
+    rankTier,
+  };
+
   return (
     <div className="rounded-2xl border border-white/5 bg-neutral-950/60 p-5 backdrop-blur-md">
       <div className="mb-4 flex items-center justify-between">
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-purple-100/45">
           {t("dash.achievements")}
         </p>
-        <button className="flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[11px] text-purple-100/55 transition hover:bg-white/[0.07]">
-          {achievementsUnlocked} / {achievementsTotal} ›
-        </button>
+        <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[11px] tabular-nums text-purple-100/55">
+          {unlockedCount} / {total}
+        </span>
       </div>
 
-      <div className="grid grid-cols-3 gap-4 sm:grid-cols-3">
-        {profileAchievements.map((ach) => {
-          const Icon = ach.icon;
-          const glow = RARITY_GLOW[ach.rarity];
-          return (
-            <div key={ach.id} className="flex flex-col items-center gap-2">
-              <div
-                className={`flex h-16 w-16 items-center justify-center rounded-full border ${
-                  ach.unlocked
-                    ? "border-[color:var(--accent-border)] bg-purple-500/10 text-purple-100"
-                    : "border-white/10 bg-white/[0.03] text-purple-100/25"
-                }`}
-                style={
-                  ach.unlocked
-                    ? { boxShadow: `0 0 ${8 + glow * 22}px var(--accent-glow)` }
-                    : undefined
-                }
-                title={t(`profile.ach.rarity.${ach.rarity}`)}
-              >
-                {!ach.unlocked ? <Lock size={20} /> : <Icon size={22} />}
-              </div>
-              <p
-                className={`line-clamp-2 text-center text-[11px] leading-tight ${
-                  ach.unlocked ? "text-purple-100/70" : "text-purple-100/30"
-                }`}
-              >
-                {t(ach.titleKey)}
-              </p>
-            </div>
-          );
-        })}
+      <div
+        className={`grid gap-4 ${
+          isExpanded
+            ? "grid-cols-3 sm:grid-cols-4 lg:grid-cols-5"
+            : "grid-cols-3 sm:grid-cols-6"
+        }`}
+      >
+        {visible.map((achievement, index) => (
+          <AchievementTile
+            key={achievement.id}
+            achievement={achievement}
+            isUnlocked={achievement.isUnlocked}
+            progress={getAchievementProgress(
+              achievement,
+              metrics,
+              achievement.isUnlocked,
+            )}
+            current={getMetricValue(achievement, metrics)}
+            delay={index * 0.03}
+          />
+        ))}
       </div>
+
+      {hiddenCount > 0 && (
+        <button
+          onClick={() => setExpanded(!isExpanded)}
+          className="mt-4 w-full rounded-xl border border-white/10 bg-white/[0.03] py-2 text-[11px] text-purple-100/50 transition hover:bg-white/[0.07] hover:text-white"
+        >
+          {isExpanded
+            ? t("achievement.showLess")
+            : t("achievement.showAll", { count: hiddenCount })}
+        </button>
+      )}
     </div>
   );
 }

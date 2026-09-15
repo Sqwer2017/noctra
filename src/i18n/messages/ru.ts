@@ -109,6 +109,8 @@ const ru = {
   "login.error.anonymous_disabled":
     "Гостевой вход отключён в проекте Supabase. Включи Anonymous Sign-in в Authentication → Providers или зарегистрируйся.",
   "login.error.rate_limited": "Слишком много попыток. Подожди немного.",
+  "login.error.server_error":
+    "База отклонила создание аккаунта. Обычно это ошибка в SQL-триггере регистрации — проверь логи Supabase (Authentication → Logs).",
   "login.error.supabase_not_configured":
     "Supabase не настроен: заполни VITE_SUPABASE_URL и VITE_SUPABASE_ANON_KEY",
   "login.error.confirmEmail":
@@ -116,8 +118,10 @@ const ru = {
   "login.error.google_cancelled": "Вход через Google отменён",
   "login.error.google_failed":
     "Не удалось войти через Google. Попробуй ещё раз или используй email.",
-  "login.error.oauth_redirect_failed":
-    "Не удалось начать вход через Google. Проверь, что провайдер Google включён в Supabase.",
+  "login.error.google_not_configured":
+    "Вход через Google не настроен: нужен VITE_GOOGLE_CLIENT_ID и домен в Authorized JavaScript origins.",
+  "login.error.google_nonce_mismatch":
+    "Не сработала проверка подлинности токена Google. Обнови страницу и попробуй снова.",
   "login.error.unknown": "Не удалось выполнить вход. Попробуй ещё раз.",
 
   // ── Загрузка аватара/баннера ─────────────────────────────────────
@@ -125,6 +129,9 @@ const ru = {
   "profile.upload.too_large": "Файл больше 5 МБ — выбери другой",
   "profile.upload.not_authenticated": "Нужно войти, чтобы загрузить изображение",
   "profile.upload.upload_failed": "Не удалось загрузить изображение. Попробуй ещё раз.",
+  "profile.error.tagTaken":
+    "Этот тег уже занят — выбери другой. По тегу тебя будут искать другие слушатели.",
+  "profile.error.saveFailed": "Не удалось сохранить профиль. Попробуй ещё раз.",
 
   // ── Рабочий стол (пустой) ────────────────────────────────────────
   "workspace.empty.title": "Рабочий стол пуст",
@@ -240,6 +247,39 @@ const ru = {
   "profile.ach.rarity.rare": "Редкое",
   "profile.ach.rarity.epic": "Эпическое",
   "profile.ach.rarity.legendary": "Легендарное",
+
+  // ── Достижения ────────────────────────────────────────────────────
+  // Названия видны только у открытых. Условия намеренно не раскрываются:
+  // игрок должен догадываться сам, поэтому описаний здесь нет.
+  "achievement.hidden": "???",
+  "achievement.hidden.hint": "Ещё не открыто. Догадайся, как получить.",
+  "achievement.unlocked.title": "Новое достижение",
+  "achievement.rarity.common": "Обычное",
+  "achievement.rarity.rare": "Редкое",
+  "achievement.rarity.epic": "Эпическое",
+  "achievement.rarity.legendary": "Легендарное",
+  "achievement.showAll": "Показать все (+{count})",
+  "achievement.showLess": "Свернуть",
+  "achievement.first_echo": "Первый отзвук",
+  "achievement.initiated_darkness": "Посвящённый во тьму",
+  "achievement.ether_keeper": "Хранитель эфира",
+  "achievement.abyss_architect": "Архитектор бездны",
+  "achievement.resonance_lord": "Владыка резонанса",
+  "achievement.midnight_pilgrim": "Полуночный пилигрим",
+  "achievement.deep_dive": "Глубокое погружение",
+  "achievement.void_whisper": "Шёпот пустоты",
+  "achievement.obsession": "Одержимость",
+  "achievement.blind_fate": "Слепая судьба",
+  "achievement.black_pearl": "Чёрная жемчужина",
+  "achievement.secret_archive": "Тайный архив",
+  "achievement.shadow_curator": "Куратор теней",
+  "achievement.grand_grimoire": "Великий гримуар",
+  "achievement.double_resonance": "Двойной резонанс",
+  "achievement.continuous_trance": "Непрерывный транс",
+  "achievement.eternal_wanderer": "Вечный скиталец",
+  "achievement.self_awareness": "Осознание личности",
+  "achievement.sound_alchemist": "Алхимик звука",
+  "achievement.ruler_of_noctra": "Повелитель Ноктры",
 
   // ── Музыка / поиск ────────────────────────────────────────────────
   "workspace.search.placeholder": "Поиск треков, исполнителей или источников...",
@@ -400,6 +440,7 @@ const ru = {
   "player.source.noctra": "Noctra",
   "player.time0": "0:00",
   "player.noSource": "Нет источника аудио",
+  "player.loadError": "Не удалось загрузить трек",
   "player.playpause": "Играть / Пауза",
   "player.addToPlaylist": "Добавить трек в плейлист",
   "player.fav.add": "В избранное",

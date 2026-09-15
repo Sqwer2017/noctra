@@ -106,6 +106,32 @@ export class SupabaseProfileRepository implements ProfileRepository {
       patch.tag = nickToHandle(input.nick);
     }
 
+    /*
+     * Проверяем занятость тега ДО записи.
+     *
+     * В базе тег уникален (миграция 003), поэтому попытка занять чужой
+     * вернула бы ошибку нарушения ограничения — а она выглядит как
+     * «duplicate key value violates unique constraint», что пользователю
+     * ничего не объясняет. Здесь отдаём понятный код, который UI переведёт
+     * в человеческий текст.
+     */
+    if (patch.tag) {
+      const { data: taken, error: checkError } = await client
+        .from("profiles")
+        .select("id")
+        .eq("tag", patch.tag)
+        .neq("id", userId)
+        .maybeSingle<{ id: string }>();
+
+      if (checkError) {
+        // Не блокируем сохранение из-за сбоя проверки — UNIQUE в базе
+        // всё равно не даст создать дубликат.
+        console.warn("[profile] не удалось проверить тег:", checkError.message);
+      } else if (taken) {
+        throw new ProfileError("tag_taken");
+      }
+    }
+
     const { data, error } = await client
       .from("profiles")
       .update(patch)
@@ -113,8 +139,27 @@ export class SupabaseProfileRepository implements ProfileRepository {
       .select("*")
       .single<ProfileRow>();
 
-    if (error) throw error;
+    if (error) {
+      // Подстраховка на случай гонки: тег заняли между проверкой и записью.
+      if (String(error.message).includes("profiles_tag_unique_idx")
+          || String(error.message).includes("duplicate key")) {
+        throw new ProfileError("tag_taken");
+      }
+      throw error;
+    }
+
     return rowToProfile(data);
+  }
+}
+
+/** Ошибка профиля с кодом, который UI переводит через i18n. */
+export class ProfileError extends Error {
+  readonly code: "tag_taken";
+
+  constructor(code: "tag_taken") {
+    super(code);
+    this.name = "ProfileError";
+    this.code = code;
   }
 }
 
@@ -270,7 +315,17 @@ export async function pushProgression(
     },
     async () => {
       const client = requireSupabase();
-      const { error } = await client
+
+      /*
+       * `.select()` здесь принципиален.
+       *
+       * PostgREST на UPDATE без `.select()` возвращает успех, даже если
+       * не совпала ни одна строка. Если профиля в базе нет (например, триггер
+       * регистрации не сработал), запись молча «проходила», в очередь повтора
+       * ничего не попадало, и прогресс исчезал без следа.
+       * С `.select()` мы видим пустой результат и поднимаем ошибку.
+       */
+      const { data, error } = await client
         .from("profiles")
         .update({
           xp: progress.xp,
@@ -283,8 +338,16 @@ export async function pushProgression(
           daily_completed_tracks: progress.completedTracks,
           playlist_xp_claimed: progress.playlistXpClaimed,
         })
-        .eq("id", userId);
+        .eq("id", userId)
+        .select("id");
+
       if (error) throw error;
+
+      if (!data || data.length === 0) {
+        throw new Error(
+          `profiles: строка для ${userId} не найдена — прогресс не сохранён`,
+        );
+      }
     },
   );
 }

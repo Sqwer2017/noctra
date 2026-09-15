@@ -10,6 +10,8 @@ import type { Playlist, PlaylistTrack } from "../../types/playlist";
 import { usePlayerStore } from "../../store/usePlayerStore";
 import { useLibraryStore } from "../../store/useLibraryStore";
 import { useProgressionStore } from "../../store/useProgressionStore";
+import { usePlayerHotkeys } from "../../hooks/usePlayerHotkeys";
+import { useMediaSession } from "../../hooks/useMediaSession";
 
 import type { WindowId } from "../../types/windows";
 
@@ -24,6 +26,13 @@ const MAX_REGULAR_WINDOWS = 4;
 const defaultWindows: WindowId[] = ["music-search", "playlists"];
 
 export function AppShell({ onLogout, onRequestSignIn }: AppShellProps) {
+  // Пробел, стрелки, M — управление плеером с клавиатуры.
+  usePlayerHotkeys();
+
+  // Системные медиа-клавиши (Fn+F8, кнопки на наушниках) и карточка трека
+  // в системном оверлее.
+  useMediaSession();
+
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [openedWindows, setOpenedWindows] =
     useState<WindowId[]>(defaultWindows);
@@ -151,14 +160,48 @@ export function AppShell({ onLogout, onRequestSignIn }: AppShellProps) {
   const storeSelectQueueTrack = usePlayerStore((s) => s.selectQueueTrack);
 
   useEffect(() => {
-    // Перед закрытием вкладки дописываем прогресс: иначе последние секунды
-    // прослушивания и свежий XP могут не успеть уйти в облако.
+    /*
+     * Сохранение прогресса при уходе со страницы.
+     *
+     * `beforeunload` для этого не подходит: браузер не даёт дождаться
+     * асинхронной записи и закрывает страницу раньше, чем уходит запрос.
+     * `visibilitychange` со состоянием `hidden` срабатывает надёжно —
+     * при закрытии вкладки, сворачивании окна и уходе в фон на телефоне.
+     */
+    const handleVisibilityChange = () => {
+      useProgressionStore.getState().flushOnHide();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    // Дополнительная страховка для случаев, когда вкладку именно закрывают.
     const flush = () => {
       void useProgressionStore.getState().flushToCloud();
     };
 
-    window.addEventListener("beforeunload", flush);
-    return () => window.removeEventListener("beforeunload", flush);
+    window.addEventListener("pagehide", flush);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", flush);
+    };
+  }, []);
+
+  /*
+   * Heartbeat: раз в 30 секунд дописываем прогресс в базу, пока играет музыка.
+   *
+   * Троттлинг внутри стора и так отправляет изменения, но при долгом
+   * непрерывном прослушивании полезно иметь гарантированную точку сохранения —
+   * на случай, если отдельная запись потерялась в сети.
+   */
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const { isPlaying } = usePlayerStore.getState();
+      if (!isPlaying) return;
+      void useProgressionStore.getState().flushToCloud();
+    }, 30_000);
+
+    return () => window.clearInterval(id);
   }, []);
 
 function createPlaylist(newPlaylist: Omit<Playlist, "id" | "tracks">) {

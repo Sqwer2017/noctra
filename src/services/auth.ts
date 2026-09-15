@@ -4,20 +4,22 @@ import { requestGoogleIdToken, isGoogleOneTapConfigured } from "../lib/google";
 /**
  * Сервис авторизации.
  *
- * Вход через Google реализован двумя путями, и это сделано намеренно:
+ * Вход через Google — ТОЛЬКО нативный One Tap (Google Identity Services).
  *
- *  1. Google One Tap (нативный GIS) — `signInWithIdToken`. Красиво и без
- *     редиректа, но требует OAuth Client ID и доступности скрипта Google.
- *  2. Redirect OAuth через Supabase — `signInWithOAuth`. Работает всегда,
- *     когда провайдер Google включён в Supabase.
+ * Токен получаем прямо в браузере через `google.accounts.id.prompt()` и
+ * передаём в Supabase как idToken. Никаких редиректов: пользователь остаётся
+ * на той же странице, состояние приложения не теряется, а сам вход занимает
+ * одно нажатие.
  *
- * Основная функция `signInWithGoogle()` сама выбирает путь: пробует One Tap,
- * а если он недоступен или отменён — уходит на редирект. Кнопка в UI всегда
- * рабочая и не зависит от того, завёл ли владелец Client ID.
+ * Прежний фоллбэк на `signInWithOAuth` убран: он полностью перезагружал
+ * страницу и терял состояние плеера. Если One Tap недоступен (нет Client ID,
+ * скрипт заблокирован, FedCM выключен), мы честно сообщаем об этом, а не
+ * подменяем способ входа — иначе человек считал бы, что вошёл через Google,
+ * хотя получил другой аккаунт.
  */
 
 export type AuthResult =
-  | { ok: true; needsEmailConfirm?: boolean; redirected?: boolean }
+  | { ok: true; needsEmailConfirm?: boolean }
   | { ok: false; code: AuthErrorCode };
 
 export type AuthErrorCode =
@@ -28,9 +30,11 @@ export type AuthErrorCode =
   | "email_invalid"
   | "anonymous_disabled"
   | "rate_limited"
+  | "server_error"
   | "google_cancelled"
+  | "google_not_configured"
+  | "google_nonce_mismatch"
   | "google_failed"
-  | "oauth_redirect_failed"
   | "unknown";
 
 /** Переводит ошибку Supabase в наш код. */
@@ -57,13 +61,36 @@ function mapError(error: {
   }
   if (error.status === 429 || message.includes("rate limit")) return "rate_limited";
 
+  /*
+   * Ошибка на стороне базы при создании пользователя.
+   *
+   * Так выглядит сбой триггера handle_new_user: Supabase отвечает
+   * HTTP 500 «Database error creating anonymous user». Со стороны клиента
+   * это не отличимо от прочих сбоев, поэтому выделяем в отдельный код —
+   * по нему сразу понятно, что чинить надо в SQL, а не в приложении.
+   */
+  if (message.includes("database error") || error.status === 500) {
+    return "server_error";
+  }
+
   return "unknown";
 }
 
 // ── Вход по idToken (Google One Tap) ──────────────────────────────────
 
+/**
+ * Обменивает Google id-токен на сессию Supabase.
+ *
+ * Nonce обязателен с обеих сторон: Google встраивает его в токен, а Supabase
+ * сверяет с переданным. Если отправить токен без nonce (или наоборот),
+ * Supabase отклонит вход с ошибкой 400:
+ *   «Passed nonce and nonce in id_token should either both exist or not».
+ * Именно это ломало вход раньше — токен приходил с nonce, а мы его не
+ * передавали.
+ */
 export async function signInWithGoogleIdToken(
   idToken: string,
+  nonce: string,
 ): Promise<AuthResult> {
   if (!isSupabaseConfigured || !supabase) {
     return { ok: false, code: "supabase_not_configured" };
@@ -72,65 +99,55 @@ export async function signInWithGoogleIdToken(
   const { error } = await supabase.auth.signInWithIdToken({
     provider: "google",
     token: idToken,
+    nonce,
   });
 
   if (error) {
     console.warn("[auth] signInWithIdToken не удался:", error.message);
+
+    // Отдельно отмечаем рассинхрон nonce: это ошибка конфигурации,
+    // а не отказ пользователя, и лечится она иначе.
+    if (error.message.toLowerCase().includes("nonce")) {
+      return { ok: false, code: "google_nonce_mismatch" };
+    }
+
     return { ok: false, code: "google_failed" };
   }
 
   return { ok: true };
 }
 
-// ── Вход через редирект OAuth (фоллбэк) ───────────────────────────────
-
-export async function signInWithGoogleRedirect(): Promise<AuthResult> {
-  if (!isSupabaseConfigured || !supabase) {
-    return { ok: false, code: "supabase_not_configured" };
-  }
-
-  const { error } = await supabase.auth.signInWithOAuth({
-    provider: "google",
-    options: {
-      // Возвращаемся на текущий origin: работает и на localhost, и на Vercel.
-      redirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
-      queryParams: { prompt: "select_account" },
-    },
-  });
-
-  if (error) {
-    console.warn("[auth] signInWithOAuth не удался:", error.message);
-    return { ok: false, code: "oauth_redirect_failed" };
-  }
-
-  // Браузер уходит на Google — сессия появится после возврата.
-  return { ok: true, redirected: true };
-}
-
 /**
- * Основной вход через Google: One Tap, при неудаче — редирект.
+ * Вход через Google — строго нативный One Tap.
  *
- * Возвращаем `redirected: true`, если пользователя уводит на страницу Google
- * (тогда UI не должен показывать «успех» — страница перезагрузится сама).
+ * Никаких редиректов: токен получаем прямо в браузере через Google Identity
+ * Services (`google.accounts.id.prompt()`) и передаём в Supabase как idToken.
+ * Пользователь остаётся на той же странице, состояние приложения не теряется.
+ *
+ * Если One Tap недоступен (не задан Client ID, скрипт не загрузился, FedCM
+ * выключен, пользователь закрыл окно) — возвращаем понятный код ошибки.
+ * Молчаливая подмена другим способом входа была бы обманом: человек думал бы,
+ * что вошёл через Google, хотя получил другой аккаунт.
  */
 export async function signInWithGoogle(): Promise<AuthResult> {
   if (!isSupabaseConfigured || !supabase) {
     return { ok: false, code: "supabase_not_configured" };
   }
 
-  if (isGoogleOneTapConfigured) {
-    const idToken = await requestGoogleIdToken();
-
-    if (idToken) {
-      return signInWithGoogleIdToken(idToken);
-    }
-
-    // One Tap не показался или пользователь закрыл окно. Молча уходим на
-    // редирект — так кнопка остаётся рабочей в любом окружении.
-    console.info("[auth] One Tap недоступен, переходим на OAuth-редирект");
+  if (!isGoogleOneTapConfigured) {
+    return { ok: false, code: "google_not_configured" };
   }
 
-  return signInWithGoogleRedirect();
+  const result = await requestGoogleIdToken();
+
+  if (!result) {
+    // One Tap не показался или пользователь его закрыл.
+    return { ok: false, code: "google_cancelled" };
+  }
+
+  // nonce передаём вместе с токеном: Google встроил его в токен,
+  // Supabase должен получить то же значение для проверки.
+  return signInWithGoogleIdToken(result.idToken, result.nonce);
 }
 
 // ── Прочие способы входа ──────────────────────────────────────────────

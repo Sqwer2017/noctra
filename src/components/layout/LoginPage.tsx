@@ -132,12 +132,14 @@ export function LoginPage({ onLogin }: LoginPageProps) {
       return;
     }
 
-    // Локальный режим: Supabase не настроен — входим по нику, как раньше.
+    /*
+     * Без настроенного Supabase вход по email невозможен.
+     * Раньше здесь происходил молчаливый вход по нику — со стороны это
+     * выглядело как успешная авторизация, хотя аккаунта не создавалось
+     * и данные никуда не синхронизировались. Теперь сообщаем прямо.
+     */
     if (!isSupabaseConfigured) {
-      setIsSuccess(true);
-      window.setTimeout(() => {
-        onLogin(mode === "register" ? nick.trim() : undefined);
-      }, 420);
+      fail(t("login.error.supabase_not_configured"));
       return;
     }
 
@@ -172,8 +174,14 @@ export function LoginPage({ onLogin }: LoginPageProps) {
   async function handleGoogle() {
     setFormError(null);
 
+    /*
+     * Если Supabase не настроен, раньше здесь молча вызывался onLogin() —
+     * человек думал, что вошёл через Google, а на деле получал гостя без
+     * аккаунта и без синхронизации. Теперь честно говорим, что вход
+     * недоступен, и объясняем причину.
+     */
     if (!isSupabaseConfigured) {
-      onLogin();
+      fail(t("login.error.supabase_not_configured"));
       return;
     }
 
@@ -187,9 +195,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
         return;
       }
 
-      // При редиректе браузер сам уйдёт на Google и вернётся с сессией.
-      if (result.redirected) return;
-
+      // One Tap входит без перезагрузки страницы — сразу переходим в приложение.
       setIsSuccess(true);
       window.setTimeout(() => onLogin(), 420);
     } finally {
@@ -245,7 +251,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
           >
           {/* Лого на мобильных: на десктопе он живёт в витрине */}
           <div className="mb-7 flex flex-col items-center text-center lg:hidden">
-            <img src={logo} alt="Noctra" className="h-20 object-contain" />
+            <img src={logo} alt="Noctra" className="h-24 object-contain" />
             <h1 className="mt-3 text-2xl font-bold tracking-[0.22em] text-white">
               NOCTRA
             </h1>
@@ -506,7 +512,7 @@ function ShowcasePanel() {
           <img
             src={logo}
             alt="Noctra"
-            className="auth-logo-float h-32 object-contain drop-shadow-[0_0_28px_var(--accent-glow)] xl:h-40"
+            className="auth-logo-float h-40 object-contain drop-shadow-[0_0_28px_var(--accent-glow)] xl:h-48"
           />
         </div>
 

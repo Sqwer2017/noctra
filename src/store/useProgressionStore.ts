@@ -11,7 +11,7 @@ import {
   getRankProgress,
 } from "../lib/ranks";
 import type { Rank, RankProgress } from "../lib/ranks";
-import { debounce } from "../lib/async";
+import { throttle } from "../lib/async";
 import { isSupabaseConfigured } from "../lib/supabase";
 import { currentUserId } from "../lib/supabase/sync";
 import { fetchProgression, pushProgression } from "../lib/supabase/profile";
@@ -128,18 +128,22 @@ type ProgressionState = {
   hydrateFromCloud: () => Promise<void>;
   /** Принудительно отправляет накопленное (пауза, уход со страницы). */
   flushToCloud: () => Promise<void>;
+  /** Запись при скрытии вкладки — надёжнее, чем beforeunload. */
+  flushOnHide: () => void;
   /** Сброс при выходе из аккаунта. */
   resetLocal: () => void;
 };
 
 // ── Фоновая отправка в Supabase ───────────────────────────────────────
 //
-// Прослушивание тикает раз в секунду. Отправлять каждый тик нельзя — это
-// сотни запросов за сессию. Поэтому: локальный стейт меняется мгновенно,
-// а в облако уходит «склеенная» запись не чаще, чем раз в SYNC_INTERVAL_MS.
+// Прослушивание тикает раз в секунду, и раньше здесь стоял debounce с окном
+// 3 секунды. Это была ошибка: каждый тик сбрасывал таймер, поэтому под
+// непрерывной музыкой запись не уходила НИКОГДА — она ждала паузы в 3 секунды.
+// Набранный XP оставался только в памяти и терялся при перезагрузке.
 //
-// 3 секунды — компромисс: при паузе в прослушивании прогресс уезжает почти
-// сразу, но за час непрерывной музыки набирается ~1200 записей вместо 3600.
+// Теперь throttle: первый вызов проходит сразу, следующие — не чаще раза
+// в SYNC_INTERVAL_MS, но с обязательным «догоняющим» вызовом. Прогресс
+// уходит в базу даже во время непрерывного прослушивания.
 const SYNC_INTERVAL_MS = 3_000;
 
 /** Отправляет текущее состояние прогресса в облако. */
@@ -173,9 +177,29 @@ async function syncProgressionNow(): Promise<void> {
  * Дебаунс живёт на уровне модуля, а не в сторе: он не должен попадать
  * в persist-снапшот и обязан быть общим для всех вызовов.
  */
-const scheduleCloudSync = debounce(() => {
+const scheduleCloudSync = throttle(() => {
   void syncProgressionNow();
 }, SYNC_INTERVAL_MS);
+
+/**
+ * Объединяет историю прослушивания по дням.
+ *
+ * По каждой дате берём большее значение: минуты только накапливаются, поэтому
+ * расхождение означает, что одно из хранилищ отстало. Складывать нельзя —
+ * получилось бы задвоение.
+ */
+function mergeHistory(
+  local: Record<string, number>,
+  cloud: Record<string, number>,
+): Record<string, number> {
+  const merged: Record<string, number> = { ...cloud };
+
+  for (const [date, minutes] of Object.entries(local)) {
+    merged[date] = Math.max(merged[date] ?? 0, minutes);
+  }
+
+  return merged;
+}
 
 /** Отправляет состояние одного задания (прогресс или факт награды). */
 async function persistQuest(id: QuestId, claimed: boolean): Promise<void> {
@@ -359,18 +383,45 @@ export const useProgressionStore = create<ProgressionState>()(
 
         const patch: Partial<ProgressionState> = {};
 
+        /*
+         * СЛИЯНИЕ, а не перезапись.
+         *
+         * Раньше здесь стоял `patch.totalXP = progression.xp ?? 0` — облачное
+         * значение затирало локальное безусловно. Если часть прогресса ещё не
+         * успела уйти в базу (синк в полёте, сеть мигнула, страницу закрыли),
+         * набранный XP пропадал: было 23 — после перезагрузки стало 16.
+         *
+         * Накопительные счётчики только растут, поэтому берём максимум —
+         * так не теряется ни локальный прогресс, ни облачный (например,
+         * набранный с другого устройства).
+         */
+        const local = get();
+
         if (progression) {
-          patch.totalXP = progression.xp ?? 0;
+          patch.totalXP = Math.max(local.totalXP, progression.xp ?? 0);
 
           // Дневное состояние переносим, только если оно за сегодня —
           // иначе локальный rollover сам обнулит счётчики.
           if (progression.daily_date === todayKey()) {
             patch.daily = {
               date: progression.daily_date,
-              listenedSeconds: progression.daily_listened_seconds ?? 0,
-              favoritesAdded: progression.daily_favorites_added ?? 0,
-              completedTracks: progression.daily_completed_tracks ?? 0,
-              playlistXpClaimed: Boolean(progression.playlist_xp_claimed),
+              // Дневные счётчики тоже берём по максимуму: они обнуляются
+              // при смене дня, поэтому расхождение означает недосинкронизацию.
+              listenedSeconds: Math.max(
+                local.daily.listenedSeconds,
+                progression.daily_listened_seconds ?? 0,
+              ),
+              favoritesAdded: Math.max(
+                local.daily.favoritesAdded,
+                progression.daily_favorites_added ?? 0,
+              ),
+              completedTracks: Math.max(
+                local.daily.completedTracks,
+                progression.daily_completed_tracks ?? 0,
+              ),
+              playlistXpClaimed:
+                local.daily.playlistXpClaimed ||
+                Boolean(progression.playlist_xp_claimed),
               quests: {
                 immersion: { claimed: false },
                 collector: { claimed: false },
@@ -381,9 +432,17 @@ export const useProgressionStore = create<ProgressionState>()(
         }
 
         if (stats) {
-          patch.totalSecondsListened = stats.totalSecondsListened;
-          patch.totalTracksPlayed = stats.totalTracksPlayed;
-          patch.historyMap = stats.history;
+          patch.totalSecondsListened = Math.max(
+            local.totalSecondsListened,
+            stats.totalSecondsListened,
+          );
+          patch.totalTracksPlayed = Math.max(
+            local.totalTracksPlayed,
+            stats.totalTracksPlayed,
+          );
+
+          // Историю по дням объединяем: по каждой дате берём большее значение.
+          patch.historyMap = mergeHistory(local.historyMap, stats.history);
         }
 
         // Статусы наград берём из таблицы квестов — она точнее.
@@ -405,10 +464,28 @@ export const useProgressionStore = create<ProgressionState>()(
       },
 
       flushToCloud: async () => {
-        // Сбрасываем отложенный таймер и пишем немедленно: вызывается на
-        // паузе и при уходе со страницы, когда ждать 15 секунд нельзя.
+        // Гасим отложенный вызов и пишем немедленно: вызывается при уходе
+        // со страницы и выходе из аккаунта, когда ждать окно троттлинга нельзя.
         scheduleCloudSync.cancel();
         await syncProgressionNow();
+      },
+
+      /**
+       * Записывает прогресс при скрытии вкладки.
+       *
+       * Именно `visibilitychange`, а не `beforeunload`: браузер не даёт
+       * дождаться асинхронной записи при закрытии страницы, поэтому
+       * `beforeunload` + await не гарантировал сохранение. Событие скрытия
+       * вкладки обрабатывается надёжно (в том числе при сворачивании
+       * и переходе в другое приложение на телефоне).
+       */
+      flushOnHide: () => {
+        if (typeof document === "undefined") return;
+
+        if (document.visibilityState === "hidden") {
+          scheduleCloudSync.cancel();
+          void syncProgressionNow();
+        }
       },
 
       resetLocal: () =>

@@ -103,6 +103,8 @@ const en = {
   "login.error.anonymous_disabled":
     "Guest sign-in is disabled in your Supabase project. Enable Anonymous Sign-in under Authentication → Providers, or create an account.",
   "login.error.rate_limited": "Too many attempts. Please wait a moment.",
+  "login.error.server_error":
+    "The database rejected the sign-up. This usually means the registration SQL trigger failed — check Supabase logs (Authentication → Logs).",
   "login.error.supabase_not_configured":
     "Supabase is not configured: set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY",
   "login.error.confirmEmail":
@@ -110,8 +112,10 @@ const en = {
   "login.error.google_cancelled": "Google sign-in was cancelled",
   "login.error.google_failed":
     "Google sign-in failed. Please try again or use email instead.",
-  "login.error.oauth_redirect_failed":
-    "Could not start Google sign-in. Make sure the Google provider is enabled in Supabase.",
+  "login.error.google_not_configured":
+    "Google sign-in is not configured: VITE_GOOGLE_CLIENT_ID is required, and your domain must be in Authorized JavaScript origins.",
+  "login.error.google_nonce_mismatch":
+    "Google token verification failed. Reload the page and try again.",
   "login.error.unknown": "Sign-in failed. Please try again.",
 
   // ── Avatar / banner upload ───────────────────────────────────────
@@ -119,6 +123,9 @@ const en = {
   "profile.upload.too_large": "File is larger than 5 MB — pick another one",
   "profile.upload.not_authenticated": "Sign in to upload an image",
   "profile.upload.upload_failed": "Upload failed. Please try again.",
+  "profile.error.tagTaken":
+    "That tag is already taken — pick another one. Other listeners will find you by tag.",
+  "profile.error.saveFailed": "Could not save your profile. Please try again.",
 
   "workspace.empty.title": "Noctra workspace is empty",
   "workspace.empty.body":
@@ -232,6 +239,39 @@ const en = {
   "profile.ach.rarity.rare": "Rare",
   "profile.ach.rarity.epic": "Epic",
   "profile.ach.rarity.legendary": "Legendary",
+
+  // ── Achievements ─────────────────────────────────────────────────
+  // Names are revealed only for unlocked ones; conditions stay secret
+  // on purpose so players have to figure them out.
+  "achievement.hidden": "???",
+  "achievement.hidden.hint": "Not unlocked yet. Figure out how to get it.",
+  "achievement.unlocked.title": "New achievement",
+  "achievement.rarity.common": "Common",
+  "achievement.rarity.rare": "Rare",
+  "achievement.rarity.epic": "Epic",
+  "achievement.rarity.legendary": "Legendary",
+  "achievement.showAll": "Show all (+{count})",
+  "achievement.showLess": "Collapse",
+  "achievement.first_echo": "The First Echo",
+  "achievement.initiated_darkness": "Initiated into Darkness",
+  "achievement.ether_keeper": "Guardian of the Ether",
+  "achievement.abyss_architect": "Architect of the Abyss",
+  "achievement.resonance_lord": "Master of Resonance",
+  "achievement.midnight_pilgrim": "Midnight Pilgrim",
+  "achievement.deep_dive": "Deep Dive",
+  "achievement.void_whisper": "Whisper of the Void",
+  "achievement.obsession": "Obsession",
+  "achievement.blind_fate": "Blind Fate",
+  "achievement.black_pearl": "Black Pearl",
+  "achievement.secret_archive": "Secret Archive",
+  "achievement.shadow_curator": "Curator of Shadows",
+  "achievement.grand_grimoire": "The Grand Grimoire",
+  "achievement.double_resonance": "Double Resonance",
+  "achievement.continuous_trance": "Continuous Trance",
+  "achievement.eternal_wanderer": "Eternal Wanderer",
+  "achievement.self_awareness": "Self-awareness",
+  "achievement.sound_alchemist": "Alchemist of Sound",
+  "achievement.ruler_of_noctra": "Ruler of Noctra",
 
   "workspace.search.placeholder": "Search tracks, artists or sources...",
   "workspace.search.clear": "Clear search",
@@ -382,6 +422,7 @@ const en = {
   "player.source.noctra": "Noctra",
   "player.time0": "0:00",
   "player.noSource": "No audio source",
+  "player.loadError": "Could not load the track",
   "player.playpause": "Play / Pause",
   "player.addToPlaylist": "Add current track to playlist",
   "player.fav.add": "Add to favorites",

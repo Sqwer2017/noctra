@@ -4,16 +4,19 @@ import type { Session } from "@supabase/supabase-js";
 import { AppShell } from "./components/layout/AppShell";
 import { LoginPage } from "./components/layout/LoginPage";
 import { GoogleAuthModal } from "./components/auth/GoogleAuthModal";
-import { ToastViewport } from "./components/ui/Toast";
+import { ToastViewport, spotlightToast } from "./components/ui/Toast";
+import { AchievementToast } from "./components/ui/AchievementToast";
 import { nickToHandle } from "./lib/profile";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
 import { signOut } from "./services/auth";
 import { flushSyncQueue, watchConnectivity } from "./lib/supabase/sync";
 import { ensureProfileFromAuthMetadata } from "./lib/supabase/profile";
 import { disableGoogleAutoSelect } from "./lib/google";
+import { ACHIEVEMENTS } from "./lib/achievements";
 import { useAppStore } from "./store/useAppStore";
 import { useLibraryStore } from "./store/useLibraryStore";
 import { useProgressionStore } from "./store/useProgressionStore";
+import { useAchievementsStore } from "./store/useAchievementsStore";
 import { applyAccent } from "./theme";
 
 export default function App() {
@@ -75,15 +78,46 @@ export default function App() {
     void useAppStore.getState().loadCurrentUser();
   }, [isAuthenticated]);
 
-  // Подтягиваем из облака избранное, плейлисты и прогресс + досылаем то,
-  // что не ушло в прошлый раз из-за отсутствия сети.
+  // Подтягиваем из облака избранное, плейлисты, прогресс и достижения
+  // + досылаем то, что не ушло в прошлый раз из-за отсутствия сети.
   useEffect(() => {
     if (!isAuthenticated || !isSupabaseConfigured) return;
 
     void useLibraryStore.getState().hydrateFromCloud();
     void useProgressionStore.getState().hydrateFromCloud();
+
+    // Достижения грузим после прогрессии: их выдача зависит от статистики,
+    // поэтому к моменту проверки счётчики уже актуальны.
+    void useProgressionStore
+      .getState()
+      .flushToCloud()
+      .then(() => useAchievementsStore.getState().refresh());
+
     void flushSyncQueue();
   }, [isAuthenticated]);
+
+  /*
+   * Показ уведомлений об открытых достижениях.
+   *
+   * Достижения выдаёт база, клиент лишь узнаёт о них при обновлении списка.
+   * Показываем по одному: если открылось сразу несколько, они выстроятся
+   * в очередь, а не наложатся друг на друга.
+   */
+  const pendingAchievements = useAchievementsStore(
+    (state) => state.pendingNotifications,
+  );
+
+  useEffect(() => {
+    const nextId = pendingAchievements[0];
+    if (!nextId) return;
+
+    const achievement = ACHIEVEMENTS.find((item) => item.id === nextId);
+    useAchievementsStore.getState().dismissNotification();
+
+    if (!achievement) return;
+
+    spotlightToast(<AchievementToast achievement={achievement} />, 6000);
+  }, [pendingAchievements]);
 
   // Возвращение сети — повод дослать отложенные операции.
   useEffect(() => {
@@ -139,8 +173,20 @@ export default function App() {
   }, []);
 
   const handleLogout = useCallback(async () => {
-    // Сначала гасим сессию, затем чистим локальное состояние: иначе
-    // onAuthStateChange успеет перезагрузить профиль уходящего пользователя.
+    /*
+     * Сохраняем прогресс ПЕРЕД выходом.
+     *
+     * Раньше здесь сразу шёл `signOut()`, а следом `resetLocal()` — всё, что
+     * не успело уйти в базу за последние секунды, пропадало. Теперь сначала
+     * дописываем накопленное (пока сессия ещё жива и запись разрешена RLS),
+     * и только потом гасим сессию и чистим локальное состояние.
+     */
+    try {
+      await useProgressionStore.getState().flushToCloud();
+    } catch {
+      // Выход не должен блокироваться из-за проблем с сетью.
+    }
+
     await signOut();
 
     // Отключаем автовыбор Google-аккаунта, иначе One Tap сразу предложит
@@ -149,6 +195,7 @@ export default function App() {
 
     useProgressionStore.getState().resetLocal();
     useLibraryStore.getState().resetLocal();
+    useAchievementsStore.getState().reset();
     useAppStore.getState().setIsGuest(false);
 
     setIsAuthenticated(false);

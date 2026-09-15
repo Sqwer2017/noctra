@@ -51,10 +51,23 @@ export function debounce<Args extends unknown[]>(
 export function throttle<Args extends unknown[]>(
   fn: (...args: Args) => void,
   intervalMs: number,
-): ((...args: Args) => void) & { cancel: () => void } {
+): ((...args: Args) => void) & { cancel: () => void; flush: () => void } {
   let lastCall = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let pendingArgs: Args | null = null;
+
+  const runPending = () => {
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    if (pendingArgs) {
+      const queued = pendingArgs;
+      pendingArgs = null;
+      lastCall = Date.now();
+      fn(...queued);
+    }
+  };
 
   const throttled = (...args: Args) => {
     const now = Date.now();
@@ -69,15 +82,7 @@ export function throttle<Args extends unknown[]>(
     // Запоминаем последний аргумент: выполним его по истечении окна.
     pendingArgs = args;
     if (timer === null) {
-      timer = setTimeout(() => {
-        timer = null;
-        lastCall = Date.now();
-        if (pendingArgs) {
-          const queued = pendingArgs;
-          pendingArgs = null;
-          fn(...queued);
-        }
-      }, intervalMs - elapsed);
+      timer = setTimeout(runPending, intervalMs - elapsed);
     }
   };
 
@@ -86,6 +91,15 @@ export function throttle<Args extends unknown[]>(
     timer = null;
     pendingArgs = null;
   };
+
+  /**
+   * Немедленно выполняет отложенный вызов.
+   *
+   * Нужен, когда нельзя ждать окно троттлинга: уход со страницы, сворачивание
+   * вкладки, выход из аккаунта. Без него последнее изменение осталось бы
+   * только в памяти и потерялось бы при перезагрузке.
+   */
+  throttled.flush = runPending;
 
   return throttled;
 }

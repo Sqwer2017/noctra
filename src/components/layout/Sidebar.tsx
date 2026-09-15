@@ -93,7 +93,7 @@ export function Sidebar({
             src={logo}
             alt="Noctra"
             className={`object-contain drop-shadow-[0_0_24px_rgba(168,85,247,0.35)] transition-all duration-500 ease-out ${
-              isCollapsed ? "h-16 max-w-[70px]" : "h-28 max-w-[220px]"
+              isCollapsed ? "h-[4.8rem] max-w-[84px]" : "h-[8.4rem] max-w-[264px]"
             }`}
           />
         </button>

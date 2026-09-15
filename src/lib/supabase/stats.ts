@@ -1,5 +1,5 @@
-import { supabase, isSupabaseConfigured } from "../supabase";
-import { currentUserId } from "./sync";
+import { supabase, requireSupabase, isSupabaseConfigured } from "../supabase";
+import { syncWrite } from "./sync";
 
 /**
  * Статистика прослушивания (`user_stats`).
@@ -52,32 +52,35 @@ export async function fetchListeningStats(
 }
 
 /**
- * Сохраняет статистику. Вызывать с батчингом (раз в ~15 секунд и на паузе).
- * Ошибка не бросается наружу — статистика не критична для работы плеера.
+ * Сохраняет статистику.
+ *
+ * Идёт через `syncWrite`, а не напрямую: при сбое сети операция попадает
+ * в очередь повтора и уйдёт позже. Раньше здесь было прямое обращение
+ * к клиенту с одним `console.warn` — при обрыве связи статистика терялась
+ * безвозвратно, хотя для остальных данных очередь работала.
  */
 export async function pushListeningStats(stats: ListeningStats): Promise<void> {
-  if (!isSupabaseConfigured || !supabase) return;
-
-  const userId = await currentUserId();
-  if (!userId) return;
-
   const roundedHistory: Record<string, number> = {};
   for (const [date, minutes] of Object.entries(stats.history)) {
     roundedHistory[date] = Math.round(minutes);
   }
 
-  const { error } = await supabase.from("user_stats").upsert(
-    {
-      user_id: userId,
-      total_seconds_listened: Math.round(stats.totalSecondsListened),
-      total_tracks_played: stats.totalTracksPlayed,
-      active_days_count: stats.activeDaysCount,
-      listening_history: roundedHistory,
-    },
-    { onConflict: "user_id" },
-  );
+  const payload = {
+    total_seconds_listened: Math.round(stats.totalSecondsListened),
+    total_tracks_played: stats.totalTracksPlayed,
+    active_days_count: stats.activeDaysCount,
+    listening_history: roundedHistory,
+  };
 
-  if (error) {
-    console.warn("[sync] не удалось сохранить статистику:", error.message);
-  }
+  await syncWrite(
+    { kind: "stats:update", at: Date.now(), payload },
+    async (userId) => {
+      const client = requireSupabase();
+      const { error } = await client
+        .from("user_stats")
+        .upsert({ user_id: userId, ...payload }, { onConflict: "user_id" });
+
+      if (error) throw error;
+    },
+  );
 }

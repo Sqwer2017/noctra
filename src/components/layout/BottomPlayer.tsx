@@ -7,6 +7,7 @@ import {
 } from "react";
 
 import {
+  AlertCircle,
   Check,
   Heart,
   ListMusic,
@@ -33,6 +34,17 @@ import { motion } from "motion/react";
 import { attachAnalyser, resumeAnalyser } from "../../audio/analyser";
 
 type PlayerMenuState = "closed" | "open" | "closing";
+
+/**
+ * Сколько ждать начала воспроизведения, прежде чем считать загрузку сбойной.
+ *
+ * 12 секунд — с запасом: медленный поток с телефона может стартовать долго,
+ * но вечно ждать нельзя, иначе плеер застревает без всякой реакции.
+ */
+const LOAD_TIMEOUT_MS = 12_000;
+
+/** Сколько раз пробовать перезагрузить поток перед переходом к следующему. */
+const MAX_RECOVERY_ATTEMPTS = 2;
 
 type BottomPlayerProps = {
   currentTrack: PlaylistTrack | null;
@@ -86,13 +98,29 @@ export function BottomPlayer({
   const setStoreVolume = usePlayerStore((s) => s.setVolume);
   const toggleStoreMute = usePlayerStore((s) => s.toggleMute);
 
+  /*
+   * Размер пула воспроизведения = базовый список + пользовательская очередь.
+   *
+   * Кнопки переключения раньше смотрели только на `playQueue`. Из-за этого
+   * в двух случаях они оказывались выключены, хотя переключать было что:
+   *  - трек добавлен свайпом/кнопкой «+» (он лежит в trackQueue);
+   *  - playQueue сузился до одного трека, а очередь непустая.
+   * Теперь учитываем оба источника — ровно то, по чему ходит playNext.
+   */
+  const poolSize = playQueue.length + trackQueue.length;
+
   const [isFocusOpen, setIsFocusOpen] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const lastTimeRef = useRef(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
   const shouldAutoPlayRef = useRef(false);
+
+  /** Сколько раз пытались восстановить текущий поток. */
+  const recoveryAttemptsRef = useRef(0);
+
+  /** Трек не удалось загрузить — показываем это в интерфейсе. */
+  const [playbackError, setPlaybackError] = useState(false);
 
   const hasAudioSource = Boolean(currentTrack?.streamUrl);
 
@@ -150,13 +178,18 @@ export function BottomPlayer({
     if (audioRef.current) audioRef.current.volume = effectiveVolume;
   }, [effectiveVolume]);
 
-  // Подключаем Web Audio анализатор к аудио-элементу (для waveform в профиле).
-  // crossOrigin — чтобы анализатор работал для кросс-доменного аудио (TG-прокси).
+  /*
+   * Подключаем Web Audio анализатор к аудио-элементу (для waveform в профиле).
+   *
+   * `crossOrigin` выставляется атрибутом на самом элементе (см. JSX), а не
+   * здесь: этот эффект выполняется ПОСЛЕ первого рендера, когда `src` уже
+   * начал грузиться. Установка CORS задним числом приводила к тому, что
+   * первый трек сессии не проходил проверку и не играл.
+   */
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
 
-    el.crossOrigin = "anonymous";
     attachAnalyser(el);
   }, []);
 
@@ -182,7 +215,6 @@ export function BottomPlayer({
   useEffect(() => {
     setCurrentTime(0);
     setAudioDuration(0);
-    lastTimeRef.current = 0;
 
     if (!audioRef.current || !currentTrack?.streamUrl) {
       setIsPlayingInStore(false);
@@ -191,10 +223,69 @@ export function BottomPlayer({
     }
 
     shouldAutoPlayRef.current = true;
+    setPlaybackError(false);
 
-    audioRef.current.pause();
-    audioRef.current.load();
-  }, [currentTrack?.id, currentTrack?.streamUrl, setIsPlayingInStore]);
+    const element = audioRef.current;
+
+    // Смена источника сразу сбрасывает счётчики восстановления.
+    recoveryAttemptsRef.current = 0;
+
+    /*
+     * Запускаем загрузку вручную.
+     *
+     * `<audio src>` обновляется React'ом, но полагаться только на это нельзя:
+     * при переходе между треками элемент может сохранить прежнее состояние
+     * загрузки, и `canplay` не придёт. Явный `load()` гарантирует, что поток
+     * начнут тянуть заново.
+     */
+    element.pause();
+    element.load();
+
+    /*
+     * СТОРОЖ ЗАГРУЗКИ.
+     *
+     * Раньше плеер ждал `canplay` бесконечно: если поток не отдавался
+     * (сеть, 404, CORS), событие не приходило никогда, и трек «висел» на
+     * 0:00 без единого сообщения — выйти можно было только перезагрузкой.
+     *
+     * Теперь через LOAD_TIMEOUT_MS проверяем, началось ли воспроизведение.
+     * Если нет — пробуем перезагрузить поток, а после нескольких неудач
+     * переходим к следующему треку, чтобы плеер не застревал.
+     */
+    const watchdog = window.setTimeout(() => {
+      const el = audioRef.current;
+      if (!el) return;
+
+      // Воспроизведение уже пошло — сторож не нужен.
+      if (!el.paused && el.currentTime > 0) return;
+
+      // Поток не стартовал. Пробуем восстановиться.
+      recoveryAttemptsRef.current += 1;
+
+      if (recoveryAttemptsRef.current <= MAX_RECOVERY_ATTEMPTS) {
+        console.warn(
+          `[player] трек не начал играть, попытка ${recoveryAttemptsRef.current}`,
+        );
+
+        shouldAutoPlayRef.current = true;
+        el.load();
+
+        // Даём ещё один шанс на повторной загрузке.
+        void startPlayback();
+        return;
+      }
+
+      // Восстановиться не удалось — честно сообщаем и идём дальше.
+      console.error("[player] трек недоступен, переключаем на следующий");
+      setPlaybackError(true);
+      setIsPlayingInStore(false);
+
+      // Переходим дальше, иначе плеер останется мёртвым на этом треке.
+      onNextTrack();
+    }, LOAD_TIMEOUT_MS);
+
+    return () => window.clearTimeout(watchdog);
+  }, [currentTrack?.id, currentTrack?.streamUrl, setIsPlayingInStore, onNextTrack]);
 
   function handleSeek(event: ChangeEvent<HTMLInputElement>) {
     if (!audioRef.current || !hasAudioSource) return;
@@ -252,8 +343,27 @@ export function BottomPlayer({
       void resumeAnalyser();
       await audioRef.current.play();
       setIsPlayingInStore(true);
-    } catch {
+      setPlaybackError(false);
+    } catch (error) {
+      /*
+       * Раньше здесь стоял пустой `catch {}` — ошибка `play()` проглатывалась
+       * без следа, и трек молча застревал на 0:00. Теперь различаем причины:
+       *  - NotAllowedError — браузер ждёт жеста пользователя (это не сбой);
+       *  - остальные (NotSupportedError, AbortError) — проблема с потоком.
+       */
+      const name = error instanceof Error ? error.name : "";
+
+      if (name === "NotAllowedError") {
+        // Автовоспроизведение запрещено политикой браузера: пользователь
+        // должен нажать play сам. Это не ошибка загрузки.
+        console.info("[player] автовоспроизведение заблокировано браузером");
+        setIsPlayingInStore(false);
+        return;
+      }
+
+      console.warn("[player] не удалось запустить воспроизведение:", error);
       setIsPlayingInStore(false);
+      setPlaybackError(true);
     }
   }
 
@@ -263,16 +373,58 @@ export function BottomPlayer({
     useProgressionStore.getState().registerTrackCompleted();
 
     if (playMode === "repeat-one") {
-      // Зацикливаем текущий трек.
-      if (audioRef.current) {
-        audioRef.current.currentTime = 0;
-        void audioRef.current.play();
+      // Зацикливаем текущий трек. `.catch` обязателен: без него отклонённый
+      // `play()` становится необработанным отказом и воспроизведение молча
+      // умирает на 0:00.
+      const element = audioRef.current;
+      if (element) {
+        element.currentTime = 0;
+        void element.play().catch((error: unknown) => {
+          console.warn("[player] повтор трека не удался:", error);
+          setIsPlayingInStore(false);
+        });
       }
       restartCurrent();
       return;
     }
 
     shouldAutoPlayRef.current = true;
+    onNextTrack();
+  }
+
+  /**
+   * Ошибка загрузки потока.
+   *
+   * Без этого обработчика сбойный трек оставлял плеер в вечном ожидании:
+   * `canplay` не приходил, счётчик времени стоял на нуле, и никакой реакции
+   * в интерфейсе не было. Теперь пытаемся перезагрузить поток, а если
+   * не выходит — сообщаем и идём дальше.
+   */
+  function handleAudioError() {
+    const element = audioRef.current;
+    if (!element || !hasAudioSource) return;
+
+    const mediaError = element.error;
+
+    // Прерывание из-за смены источника — штатная ситуация, не ошибка.
+    if (mediaError?.code === MediaError.MEDIA_ERR_ABORTED) return;
+
+    console.warn(
+      "[player] ошибка загрузки трека:",
+      mediaError?.message || `код ${mediaError?.code ?? "неизвестен"}`,
+    );
+
+    recoveryAttemptsRef.current += 1;
+
+    if (recoveryAttemptsRef.current <= MAX_RECOVERY_ATTEMPTS) {
+      // Пробуем перезапустить загрузку того же потока.
+      shouldAutoPlayRef.current = true;
+      element.load();
+      return;
+    }
+
+    setPlaybackError(true);
+    setIsPlayingInStore(false);
     onNextTrack();
   }
 
@@ -342,6 +494,8 @@ export function BottomPlayer({
           ref={audioRef}
           src={currentTrack?.streamUrl}
           preload="metadata"
+          crossOrigin="anonymous"
+          onError={handleAudioError}
           onCanPlay={() => {
             if (!shouldAutoPlayRef.current) return;
 
@@ -352,7 +506,10 @@ export function BottomPlayer({
             const t = event.currentTarget.currentTime;
             setCurrentTime(t);
             setStoreCurrentTime(t);
-            lastTimeRef.current = t;
+
+            // Воспроизведение реально идёт — сбрасываем попытки восстановления,
+            // чтобы следующий сбой снова получил полный запас попыток.
+            recoveryAttemptsRef.current = 0;
           }}
           onLoadedMetadata={(event) => {
             setAudioDuration(event.currentTarget.duration);
@@ -623,9 +780,18 @@ export function BottomPlayer({
 
       <div className="w-40 min-w-0">
         <p className="truncate text-sm font-semibold">{title}</p>
-        <p className="truncate text-xs text-purple-100/45">
-          {artist} · {source}
-        </p>
+
+        {/* Ошибка загрузки: раньше плеер молча висел на 0:00 без объяснений. */}
+        {playbackError ? (
+          <p className="flex items-center gap-1 truncate text-xs text-red-300/80">
+            <AlertCircle size={11} className="m-0 block shrink-0" />
+            {t("player.loadError")}
+          </p>
+        ) : (
+          <p className="truncate text-xs text-purple-100/45">
+            {artist} · {source}
+          </p>
+        )}
       </div>
     <div className="flex items-center gap-2">
       <button
@@ -684,7 +850,8 @@ export function BottomPlayer({
 
           <button
             onClick={onPreviousTrack}
-            disabled={playQueue.length <= 1}
+            disabled={poolSize <= 1}
+            title={t("player.previous")}
             className="text-purple-100/50 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
           >
             <SkipBack size={17} />
@@ -703,7 +870,8 @@ export function BottomPlayer({
 
           <button
             onClick={onNextTrack}
-            disabled={playQueue.length <= 1}
+            disabled={poolSize <= 1}
+            title={t("player.next")}
             className="text-purple-100/50 transition hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
           >
             <SkipForward size={17} />
