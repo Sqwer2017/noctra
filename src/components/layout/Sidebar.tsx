@@ -3,6 +3,7 @@ import {
   ChevronDown,
   ChevronLeft,
   Circle,
+  LogIn,
   LogOut,
   Sparkles,
   User,
@@ -17,6 +18,9 @@ import {
   WINDOW_TITLE_KEYS,
 } from "../../i18n/windowKeys";
 import { useAppStore } from "../../store/useAppStore";
+import { useProgressionStore } from "../../store/useProgressionStore";
+import { getRankByXp } from "../../lib/ranks";
+import { RankIcon } from "../profile/RankIcon";
 
 type SidebarProps = {
   isCollapsed: boolean;
@@ -26,6 +30,8 @@ type SidebarProps = {
   onLogout: () => void;
   onOpenDashboard: () => void;
   isDashboardOpen: boolean;
+  /** Открыть окно входа (для гостя). */
+  onRequestSignIn: () => void;
 };
 
 const defaultOpenedCategories: WindowCategory[] = ["Music"];
@@ -38,12 +44,16 @@ export function Sidebar({
   onLogout,
   onOpenDashboard,
   isDashboardOpen,
+  onRequestSignIn,
 }: SidebarProps) {
   const [openedCategories, setOpenedCategories] = useState<WindowCategory[]>(
     defaultOpenedCategories,
   );
   const { t } = useT();
   const profile = useAppStore((s) => s.profile);
+  const isGuest = useAppStore((s) => s.isGuest);
+  const totalXP = useProgressionStore((s) => s.totalXP);
+  const rank = getRankByXp(totalXP);
 
   function toggleCategory(category: WindowCategory) {
     setOpenedCategories((current) =>
@@ -138,13 +148,51 @@ export function Sidebar({
           </span>
 
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-semibold">
-              {profile.nick}
+            <span className="flex items-center gap-1.5">
+              <span className="truncate text-sm font-semibold">
+                {profile.nick}
+              </span>
+
+              {/* Бейдж ранга: реальный ранг из накопленного XP */}
+              <RankIcon icon={rank.icon} size={14} glow={6} className="shrink-0" />
             </span>
             <span className="block truncate text-xs text-purple-100/45">
-              {profile.handle} · {profile.rank}
+              {profile.handle} · {t(rank.labelKey)}
             </span>
           </span>
+        </button>
+      )}
+
+      {/* Гость: сессии нет — предлагаем войти через Google */}
+      {!isCollapsed && isGuest && (
+        <button
+          onClick={onRequestSignIn}
+          title={t("auth.modal.title")}
+          className="mt-4 flex w-full items-center gap-3 rounded-2xl border border-purple-300/25 bg-purple-500/10 p-2.5 text-left transition hover:border-purple-300/40 hover:bg-purple-500/20"
+        >
+          <span className="inline-flex aspect-square h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-purple-300/20 bg-purple-500/20 p-0 leading-none">
+            <LogIn size={15} className="m-0 block" />
+          </span>
+
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-semibold">
+              {t("sidebar.signIn")}
+            </span>
+            <span className="block truncate text-xs text-purple-100/45">
+              {t("sidebar.guest")}
+            </span>
+          </span>
+        </button>
+      )}
+
+      {/* Свёрнутый вид: компактная кнопка входа для гостя */}
+      {isCollapsed && isGuest && (
+        <button
+          onClick={onRequestSignIn}
+          title={t("sidebar.signIn")}
+          className="mx-auto mt-4 inline-flex aspect-square h-12 w-12 items-center justify-center rounded-full border border-purple-300/25 bg-purple-500/15 p-0 leading-none transition hover:scale-105 hover:border-purple-300/50"
+        >
+          <LogIn size={17} className="m-0 block" />
         </button>
       )}
 

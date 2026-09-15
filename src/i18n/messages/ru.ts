@@ -52,6 +52,17 @@ const ru = {
   "sidebar.auto.tiling": "Автотайлинг",
   "sidebar.auto.body": "Максимум 4 окна. Плеер — отдельная нижняя панель.",
   "sidebar.logout": "Выйти",
+  "sidebar.signIn": "Войти",
+  "sidebar.guest": "Гость",
+
+  // ── Авторизация через Google ───────────────────────────────────────
+  "auth.modal.title": "Вход в Noctra",
+  "auth.modal.subtitle":
+    "Войди, чтобы прогресс, избранное и плейлисты сохранялись в облаке и были доступны с любого устройства.",
+  "auth.modal.notConfigured":
+    "Supabase не настроен: данные сохраняются только в этом браузере.",
+  "auth.signInWithGoogle": "Войти через Google",
+  "auth.close": "Закрыть",
 
   // ── TopBar ─────────────────────────────────────────────────────────
   "topbar.modules": "{count}/{max} модулей",
@@ -68,12 +79,37 @@ const ru = {
   "login.enter": "Войти в Noctra",
   "login.create": "Создать аккаунт",
   "login.telegram": "Продолжить через Telegram",
+  "login.or": "или",
+  "login.guest": "Войти как гость",
   "login.subtitle.note":
     "Войди в своё тёмное фэнтези-музыкальное пространство. Кастомизация профиля, модульные окна и социальные функции готовятся к MVP.",
   "login.nick.required": "Придумай никнейм, чтобы продолжить",
   "login.error.emailRequired": "Введи email",
   "login.error.passwordRequired": "Введи пароль",
   "login.error.passwordsMismatch": "Пароли не совпадают",
+  "login.error.invalid_credentials": "Неверный email или пароль",
+  "login.error.email_taken": "Этот email уже зарегистрирован",
+  "login.error.weak_password": "Слишком простой пароль — минимум 6 символов",
+  "login.error.email_invalid": "Некорректный email",
+  "login.error.anonymous_disabled":
+    "Гостевой вход отключён в проекте Supabase. Включи Anonymous Sign-in в Authentication → Providers или зарегистрируйся.",
+  "login.error.rate_limited": "Слишком много попыток. Подожди немного.",
+  "login.error.supabase_not_configured":
+    "Supabase не настроен: заполни VITE_SUPABASE_URL и VITE_SUPABASE_ANON_KEY",
+  "login.error.confirmEmail":
+    "Аккаунт создан. Подтверди email по ссылке из письма и войди.",
+  "login.error.google_cancelled": "Вход через Google отменён",
+  "login.error.google_failed":
+    "Не удалось войти через Google. Попробуй ещё раз или используй email.",
+  "login.error.oauth_redirect_failed":
+    "Не удалось начать вход через Google. Проверь, что провайдер Google включён в Supabase.",
+  "login.error.unknown": "Не удалось выполнить вход. Попробуй ещё раз.",
+
+  // ── Загрузка аватара/баннера ─────────────────────────────────────
+  "profile.upload.uploading": "Загружаем изображение…",
+  "profile.upload.too_large": "Файл больше 5 МБ — выбери другой",
+  "profile.upload.not_authenticated": "Нужно войти, чтобы загрузить изображение",
+  "profile.upload.upload_failed": "Не удалось загрузить изображение. Попробуй ещё раз.",
 
   // ── Рабочий стол (пустой) ────────────────────────────────────────
   "workspace.empty.title": "Рабочий стол пуст",
@@ -99,7 +135,6 @@ const ru = {
   "profile.editing.bio": "О себе",
   "profile.editing.avatar": "Сменить аватар",
   "profile.editing.cover": "Сменить банер",
-  "profile.view.status.suffix": "",
 
   // ── Дашборд профиля (RPG) ────────────────────────────────────────
   "dash.open": "Открыть дашборд",

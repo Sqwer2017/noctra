@@ -11,13 +11,24 @@ const app = express();
 
 const PORT = process.env.PORT || 3001;
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-// Публичный https-URL для webhook (заполняется на деплое). Пусто — webhook не активен.
-const PUBLIC_URL = process.env.PUBLIC_URL || "";
+// Публичный https-URL сервиса (заполняется на деплое).
+// Используется и для webhook, и для сборки абсолютных ссылок на аудио.
+// Пусто — работаем на localhost (локальная разработка).
+const PUBLIC_URL = (process.env.PUBLIC_URL || "").replace(/\/+$/, "");
 
 if (!BOT_TOKEN) {
   console.error("Missing TELEGRAM_BOT_TOKEN in server/.env");
   process.exit(1);
 }
+
+/**
+ * Адрес, по которому клиенты достают аудио.
+ *
+ * Раньше здесь был жёстко зашит `http://localhost:${PORT}`, и этот адрес
+ * запекался в сохранённые треки. На проде (Render) фронтенд получал ссылки
+ * на localhost и не мог воспроизвести ни один трек.
+ */
+const SELF_ORIGIN = PUBLIC_URL || `http://localhost:${PORT}`;
 
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 const TELEGRAM_FILE_API = `https://api.telegram.org/file/bot${BOT_TOKEN}`;
@@ -28,11 +39,56 @@ let telegramTracks = [];
 const DATA_DIR = path.join(process.cwd(), "data");
 const TRACKS_FILE = path.join(DATA_DIR, "telegram-tracks.json");
 
+/**
+ * Переписывает устаревшие localhost-ссылки на актуальный origin.
+ *
+ * В уже сохранённой базе (177 треков) лежат URL вида
+ * `http://localhost:3001/api/telegram/file?...`. Без этой правки они
+ * оставались бы битыми и после деплоя фикса, потому что читаются из файла
+ * как есть. Путь и query сохраняем — меняем только хост.
+ */
+function repairStoredUrl(url) {
+  if (typeof url !== "string" || !url) return url ?? null;
+
+  const localhostMatch = url.match(
+    /^https?:\/\/(?:localhost|127\.0\.0\.1)(?:\:\d+)?(\/.*)?$/i,
+  );
+
+  if (!localhostMatch) return url;
+
+  return `${SELF_ORIGIN}${localhostMatch[1] ?? ""}`;
+}
+
+/** Применяет repairStoredUrl ко всем ссылкам трека. */
+function repairStoredTrack(track) {
+  return {
+    ...track,
+    streamUrl: repairStoredUrl(track.streamUrl),
+    coverUrl: repairStoredUrl(track.coverUrl),
+  };
+}
+
 async function loadStoredTelegramTracks() {
   try {
     const fileContent = await fs.readFile(TRACKS_FILE, "utf-8");
-    telegramTracks = JSON.parse(fileContent);
+    const parsed = JSON.parse(fileContent);
+    const tracks = Array.isArray(parsed) ? parsed : [];
+
+    // Чиним ссылки прошлых синков прямо в памяти: запись в файл не нужна,
+    // а клиент сразу получает рабочие адреса.
+    telegramTracks = tracks.map(repairStoredTrack);
+
+    const repairedCount = tracks.filter(
+      (track) =>
+        repairStoredUrl(track.streamUrl) !== track.streamUrl ||
+        repairStoredUrl(track.coverUrl) !== track.coverUrl,
+    ).length;
+
     console.log(`Loaded ${telegramTracks.length} stored Telegram tracks`);
+
+    if (repairedCount > 0) {
+      console.log(`Repaired ${repairedCount} tracks with stale localhost URLs`);
+    }
   } catch {
     telegramTracks = [];
   }
@@ -47,10 +103,48 @@ async function saveTelegramTracks() {
   );
 }
 
+/**
+ * CORS.
+ *
+ * `origin: true` отражал вообще любой Origin — это лишняя широта для прода.
+ * Теперь разрешаем явный список из CORS_ORIGINS (через запятую) плюс
+ * localhost для разработки. Если список не задан, ведём себя как раньше
+ * (отражаем Origin): так деплой не сломается, если переменную забыли.
+ *
+ * Учётные данные не используются (у нас anon-ключ и токен в query), поэтому
+ * отражение Origin безопасно, и preflight от `cors` обрабатывается сам.
+ */
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || "")
+  .split(",")
+  .map((origin) => origin.trim().replace(/\/+$/, ""))
+  .filter(Boolean);
+
+function isAllowedOrigin(origin) {
+  // Запросы без Origin (curl, health-check, server-to-server) пропускаем.
+  if (!origin) return true;
+
+  // Список не настроен — оставляем прежнее поведение.
+  if (CORS_ORIGINS.length === 0) return true;
+
+  if (CORS_ORIGINS.includes(origin)) return true;
+
+  // Локальная разработка: любой порт localhost/127.0.0.1.
+  return /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/.test(origin);
+}
+
 app.use(
   cors({
-    origin: true,
+    origin(origin, callback) {
+      if (isAllowedOrigin(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      console.warn(`CORS: отклонён origin ${origin}`);
+      callback(null, false);
+    },
     allowedHeaders: ["Content-Type", "Range"],
+    methods: ["GET", "POST", "OPTIONS"],
     exposedHeaders: [
       "Content-Type",
       "Content-Length",
@@ -99,9 +193,7 @@ function secondsToDuration(seconds) {
 }
 
 function buildFileUrl(fileId) {
-  return `http://localhost:${PORT}/api/telegram/file?fileId=${encodeURIComponent(
-    fileId,
-  )}`;
+  return `${SELF_ORIGIN}/api/telegram/file?fileId=${encodeURIComponent(fileId)}`;
 }
 
 function extractTrackFromMessage(message) {

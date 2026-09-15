@@ -56,6 +56,18 @@ export function listeningXp(listenedSeconds: number): number {
   return Math.floor(Math.max(0, listenedSeconds) / XP_PER_LISTEN_SECONDS);
 }
 
+/**
+ * Уровень для колонки `profiles.level` в Supabase.
+ *
+ * В приложении шкала прогрессии задана рангами (8 порогов XP), отдельных
+ * уровней нет. Чтобы не заводить вторую конкурирующую шкалу, за уровень берём
+ * номер ранга (1..8): тогда `level` всегда согласован с `rank_tier`, и UI
+ * может читать любое из двух полей без расхождений.
+ */
+export function getLevelByXp(xp: number): number {
+  return getRankByXp(xp).tier;
+}
+
 /** Текущий ранг по XP. */
 export function getRankByXp(xp: number): Rank {
   let current = RANKS[0];

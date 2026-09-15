@@ -11,9 +11,15 @@ node_modules
 dist
 .env
 .env.local
+.env.*.local
 dist-ssr
 *.local
-.server/data
+
+# Локальные данные Telegram-синка.
+# Раньше здесь была опечатка `.server/data`, из-за чего файл с абсолютными
+# (в т.ч. localhost) ссылками попадал в репозиторий. На проде сервер сам
+# восстанавливает ссылки по PUBLIC_URL, поэтому кэш треков можно не хранить.
+server/data/
 
 # Editor directories and files
 .vscode/*

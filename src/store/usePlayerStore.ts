@@ -36,15 +36,6 @@ type PlayerState = {
 
   cyclePlayMode: () => void;
   setIsPlaying: (playing: boolean) => void;
-  /** Суммарное прослушанное время (секунды) для виджета профиля. */
-  listenedSeconds: number;
-  addListened: (seconds: number) => void;
-  /** Уникальные id треков, которые запускали (для статистики). */
-  tracksPlayedIds: string[];
-  /** Даты (YYYY-MM-DD) с активностью прослушивания. */
-  activeDays: string[];
-  /** Регистрирует старт трека: добавляет id и сегодняшнюю дату. */
-  registerPlay: (trackId: string) => void;
 
   // ── разделяемое состояние основного плеера (для «Сейчас играет») ──
   currentTime: number;
@@ -247,26 +238,6 @@ export const usePlayerStore = create<PlayerState>()(
 
       setIsPlaying: (playing) => set({ isPlaying: playing }),
 
-      listenedSeconds: 0,
-      addListened: (seconds) =>
-        set((state) => ({
-          listenedSeconds: state.listenedSeconds + Math.max(0, seconds),
-        })),
-
-      tracksPlayedIds: [],
-      activeDays: [],
-      registerPlay: (trackId) =>
-        set((state) => {
-          const today = new Date().toISOString().slice(0, 10);
-          const tracksPlayedIds = state.tracksPlayedIds.includes(trackId)
-            ? state.tracksPlayedIds
-            : [...state.tracksPlayedIds, trackId];
-          const activeDays = state.activeDays.includes(today)
-            ? state.activeDays
-            : [...state.activeDays, today];
-          return { tracksPlayedIds, activeDays };
-        }),
-
       // ── разделяемое состояние основного плеера ─────────────────────
       currentTime: 0,
       duration: 0,
@@ -321,9 +292,6 @@ export const usePlayerStore = create<PlayerState>()(
       name: "noctra.player",
       partialize: (state) => ({
         playMode: state.playMode,
-        listenedSeconds: state.listenedSeconds,
-        tracksPlayedIds: state.tracksPlayedIds,
-        activeDays: state.activeDays,
         volume: state.volume,
         isMuted: state.isMuted,
       }),

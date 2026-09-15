@@ -32,6 +32,8 @@ import type { AchievementRarity } from "../../data/profileRpg";
 import { formatListeningTime } from "../../lib/format";
 import { getRankProgress } from "../../lib/ranks";
 import { getFrequencyLevels, resumeAnalyser } from "../../audio/analyser";
+import { isSupabaseConfigured } from "../../lib/supabase";
+import { uploadProfileImage, UploadError } from "../../lib/supabase/storage";
 import { ListeningStatsModal } from "./ListeningStatsModal";
 import { DailyQuests } from "./DailyQuests";
 import { RankIcon } from "./RankIcon";
@@ -333,19 +335,45 @@ function ProfileHeroEdit({
   const [bio, setBio] = useState(initial.bio);
   const [avatarUrl, setAvatarUrl] = useState(initial.avatarUrl);
   const [coverUrl, setCoverUrl] = useState(initial.coverUrl);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   const field =
     "w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none placeholder:text-purple-100/30 focus:border-purple-300/40";
 
+  /**
+   * Выбор картинки.
+   *
+   * В облачном режиме файл уходит в Supabase Storage, а в поле профиля
+   * попадает публичный URL. Локально остаётся dataURL — сеть не нужна.
+   */
   async function pick(
     file: File | undefined,
     setter: (value: string) => void,
+    bucket: "avatars" | "banners",
   ) {
     if (!file) return;
+
+    setUploadError(null);
+
+    if (!isSupabaseConfigured) {
+      try {
+        setter(await readFileAsDataUrl(file));
+      } catch {
+        /* игнор */
+      }
+      return;
+    }
+
+    setIsUploading(true);
+
     try {
-      setter(await readFileAsDataUrl(file));
-    } catch {
-      /* игнор */
+      setter(await uploadProfileImage(file, bucket));
+    } catch (error) {
+      const code = error instanceof UploadError ? error.code : "upload_failed";
+      setUploadError(t(`profile.upload.${code}`));
+    } finally {
+      setIsUploading(false);
     }
   }
 
@@ -383,7 +411,7 @@ function ProfileHeroEdit({
               type="file"
               accept="image/*"
               className="hidden"
-              onChange={(e) => void pick(e.target.files?.[0], setCoverUrl)}
+              onChange={(e) => void pick(e.target.files?.[0], setCoverUrl, "banners")}
             />
           </label>
         </div>
@@ -401,10 +429,22 @@ function ProfileHeroEdit({
             type="file"
             accept="image/*"
             className="hidden"
-            onChange={(e) => void pick(e.target.files?.[0], setAvatarUrl)}
+              onChange={(e) => void pick(e.target.files?.[0], setAvatarUrl, "avatars")}
           />
         </label>
       </div>
+
+      {(isUploading || uploadError) && (
+        <p
+          className={`mb-4 rounded-2xl border px-4 py-2.5 text-xs ${
+            uploadError
+              ? "border-red-300/25 bg-red-500/10 text-red-100/80"
+              : "border-white/10 bg-white/[0.04] text-purple-100/60"
+          }`}
+        >
+          {uploadError ?? t("profile.upload.uploading")}
+        </p>
+      )}
 
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-3">

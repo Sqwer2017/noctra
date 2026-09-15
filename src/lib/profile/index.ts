@@ -142,11 +142,14 @@ class LocalStorageProfileRepository implements ProfileRepository {
 }
 
 /**
- * Спрятанный слой хранилища. При переходе на Supabase этот единственный
- * файл (и эта константа) заменяется на клиент к базе; во frontend-компонентах
- * ничего переписывать не нужно, они работают через репозиторий.
+ * Локальный (localStorage) адаптер репозитория профилей.
+ *
+ * Оставлен как рабочий режим, когда Supabase не настроен (`VITE_SUPABASE_URL`
+ * пустой): приложение полностью функционально без бэкенда. Выбор конкретной
+ * реализации живёт в `src/lib/repository.ts` — там же подключается облачный
+ * адаптер, поэтому циклических импортов между файлами нет.
  */
-export const profileRepository: ProfileRepository =
+export const localProfileRepository: ProfileRepository =
   new LocalStorageProfileRepository();
 
 /**
@@ -154,6 +157,6 @@ export const profileRepository: ProfileRepository =
  * TODO(supabase): источником станет select * from profiles where id = auth.uid().
  */
 export async function loadCurrentProfile(): Promise<UserProfile> {
-  const stored = await profileRepository.getByUserId(DEMO_PROFILE_ID);
-  return stored ?? (await profileRepository.create({ userId: DEMO_PROFILE_ID, nick: "Mocevn" }));
+  const stored = await localProfileRepository.getByUserId(DEMO_PROFILE_ID);
+  return stored ?? (await localProfileRepository.create({ userId: DEMO_PROFILE_ID, nick: "Mocevn" }));
 }

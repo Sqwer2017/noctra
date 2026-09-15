@@ -48,6 +48,17 @@ const en = {
   "sidebar.auto.tiling": "Auto-tiling desktop",
   "sidebar.auto.body": "Maximum 4 windows. Player is a separate bottom module.",
   "sidebar.logout": "Logout",
+  "sidebar.signIn": "Sign in",
+  "sidebar.guest": "Guest",
+
+  // ── Google sign-in ───────────────────────────────────────────────
+  "auth.modal.title": "Sign in to Noctra",
+  "auth.modal.subtitle":
+    "Sign in to keep your progress, favorites and playlists in the cloud and available on any device.",
+  "auth.modal.notConfigured":
+    "Supabase is not configured: data is stored in this browser only.",
+  "auth.signInWithGoogle": "Continue with Google",
+  "auth.close": "Close",
 
   "topbar.modules": "{count}/{max} modules",
   "topbar.search": "Search...",
@@ -62,12 +73,37 @@ const en = {
   "login.enter": "Enter Noctra",
   "login.create": "Create account",
   "login.telegram": "Continue with Telegram",
+  "login.or": "or",
+  "login.guest": "Continue as guest",
   "login.subtitle.note":
     "Enter your dark fantasy music space. Profile customization, modular windows and social features are prepared for the MVP.",
   "login.nick.required": "Choose a nickname to continue",
   "login.error.emailRequired": "Please enter your email",
   "login.error.passwordRequired": "Please enter a password",
   "login.error.passwordsMismatch": "Passwords do not match",
+  "login.error.invalid_credentials": "Wrong email or password",
+  "login.error.email_taken": "This email is already registered",
+  "login.error.weak_password": "Password is too weak — use at least 6 characters",
+  "login.error.email_invalid": "Invalid email address",
+  "login.error.anonymous_disabled":
+    "Guest sign-in is disabled in your Supabase project. Enable Anonymous Sign-in under Authentication → Providers, or create an account.",
+  "login.error.rate_limited": "Too many attempts. Please wait a moment.",
+  "login.error.supabase_not_configured":
+    "Supabase is not configured: set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY",
+  "login.error.confirmEmail":
+    "Account created. Confirm your email via the link we sent, then sign in.",
+  "login.error.google_cancelled": "Google sign-in was cancelled",
+  "login.error.google_failed":
+    "Google sign-in failed. Please try again or use email instead.",
+  "login.error.oauth_redirect_failed":
+    "Could not start Google sign-in. Make sure the Google provider is enabled in Supabase.",
+  "login.error.unknown": "Sign-in failed. Please try again.",
+
+  // ── Avatar / banner upload ───────────────────────────────────────
+  "profile.upload.uploading": "Uploading image…",
+  "profile.upload.too_large": "File is larger than 5 MB — pick another one",
+  "profile.upload.not_authenticated": "Sign in to upload an image",
+  "profile.upload.upload_failed": "Upload failed. Please try again.",
 
   "workspace.empty.title": "Noctra workspace is empty",
   "workspace.empty.body":

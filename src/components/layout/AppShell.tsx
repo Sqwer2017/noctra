@@ -8,23 +8,22 @@ import { Workspace } from "./Workspace";
 import { ProfileDashboard } from "../profile/ProfileDashboard";
 import type { Playlist, PlaylistTrack } from "../../types/playlist";
 import { usePlayerStore } from "../../store/usePlayerStore";
+import { useLibraryStore } from "../../store/useLibraryStore";
 import { useProgressionStore } from "../../store/useProgressionStore";
 
 import type { WindowId } from "../../types/windows";
 
 type AppShellProps = {
   onLogout: () => void;
+  /** Открыть окно входа — для гостя без аккаунта. */
+  onRequestSignIn: () => void;
 };
 
 const MAX_REGULAR_WINDOWS = 4;
 
 const defaultWindows: WindowId[] = ["music-search", "playlists"];
 
-const initialPlaylists: Playlist[] = [];
-const PLAYLISTS_STORAGE_KEY = "noctra.playlists";
-const FAVORITES_STORAGE_KEY = "noctra.favoriteTracks";
-
-export function AppShell({ onLogout }: AppShellProps) {
+export function AppShell({ onLogout, onRequestSignIn }: AppShellProps) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [openedWindows, setOpenedWindows] =
     useState<WindowId[]>(defaultWindows);
@@ -36,23 +35,21 @@ export function AppShell({ onLogout }: AppShellProps) {
     defaultWindows[0],
   );
 
-  const [favoriteTracks, setFavoriteTracks] = useState<PlaylistTrack[]>(() => {
-    try {
-      const savedFavorites = localStorage.getItem(FAVORITES_STORAGE_KEY);
-
-      if (!savedFavorites) {
-        return [];
-      }
-
-      return JSON.parse(savedFavorites) as PlaylistTrack[];
-    } catch {
-      return [];
-    }
-  });
-
-  useEffect(() => {
-    localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(favoriteTracks));
-  }, [favoriteTracks]);
+  // Избранное и плейлисты живут в сторе: он знает userId, умеет писать
+  // в Supabase в фоне и переживает перезагрузку через persist.
+  const favoriteTracks = useLibraryStore((s) => s.favoriteTracks);
+  const playlists = useLibraryStore((s) => s.playlists);
+  const toggleFavoriteTrack = useLibraryStore((s) => s.toggleFavoriteTrack);
+  const removeFavoriteTrackFromStore = useLibraryStore(
+    (s) => s.removeFavoriteTrack,
+  );
+  const createPlaylistInStore = useLibraryStore((s) => s.createPlaylist);
+  const updatePlaylistInStore = useLibraryStore((s) => s.updatePlaylist);
+  const deletePlaylistInStore = useLibraryStore((s) => s.deletePlaylist);
+  const addTrackToPlaylistInStore = useLibraryStore((s) => s.addTrackToPlaylist);
+  const removeTrackFromPlaylistInStore = useLibraryStore(
+    (s) => s.removeTrackFromPlaylist,
+  );
 
   // Регистрируем «открыть плеер» — чтобы действия из дашборда профиля
   // («Сейчас играет») могли развернуть модульный плеер.
@@ -66,37 +63,9 @@ export function AppShell({ onLogout }: AppShellProps) {
     return () => registerPlayerOpener(null);
   }, [registerPlayerOpener]);
 
+  /** Делегируем в стор: он синхронизирует изменения с Supabase. */
   function addTrackToPlaylist(playlistId: string, track: PlaylistTrack) {
-    setPlaylists((currentPlaylists) =>
-      currentPlaylists.map((playlist) => {
-        if (playlist.id !== playlistId) {
-          return playlist;
-        }
-
-        const alreadyExists = playlist.tracks.some(
-          (playlistTrack) => playlistTrack.id === track.id,
-        );
-
-        if (alreadyExists) {
-          return playlist;
-        }
-
-        const nextTracks = [...playlist.tracks, track];
-
-        // XP за публичный плейлист с ≥10 треками (раз в сутки).
-        useProgressionStore
-          .getState()
-          .registerPublicPlaylistComplete(
-            playlist.privacy === "Public",
-            nextTracks.length,
-          );
-
-        return {
-          ...playlist,
-          tracks: nextTracks,
-        };
-      }),
-    );
+    addTrackToPlaylistInStore(playlistId, track);
   }
 
   function openWindow(windowId: WindowId) {
@@ -168,29 +137,6 @@ export function AppShell({ onLogout }: AppShellProps) {
 
   const shouldShowTopBar = openedWindows.length === 0;
 
-  const [playlists, setPlaylists] = useState<Playlist[]>(() => {
-    try {
-      const savedPlaylists = localStorage.getItem(PLAYLISTS_STORAGE_KEY);
-
-      if (!savedPlaylists) {
-        return initialPlaylists;
-      }
-
-      const parsedPlaylists = JSON.parse(savedPlaylists) as Playlist[];
-
-      return parsedPlaylists.map((playlist) => ({
-        ...playlist,
-        description: playlist.description ?? "",
-        cover: playlist.cover ?? null,
-        privacy: playlist.privacy ?? "Public",
-        tracks: Array.isArray(playlist.tracks) ? playlist.tracks : [],
-      }));
-
-    } catch {
-      return initialPlaylists;
-    }
-  });
-
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(
     null,
   );
@@ -205,18 +151,18 @@ export function AppShell({ onLogout }: AppShellProps) {
   const storeSelectQueueTrack = usePlayerStore((s) => s.selectQueueTrack);
 
   useEffect(() => {
-  localStorage.setItem(PLAYLISTS_STORAGE_KEY, JSON.stringify(playlists));
- }, [playlists]);
+    // Перед закрытием вкладки дописываем прогресс: иначе последние секунды
+    // прослушивания и свежий XP могут не успеть уйти в облако.
+    const flush = () => {
+      void useProgressionStore.getState().flushToCloud();
+    };
+
+    window.addEventListener("beforeunload", flush);
+    return () => window.removeEventListener("beforeunload", flush);
+  }, []);
 
 function createPlaylist(newPlaylist: Omit<Playlist, "id" | "tracks">) {
-  const playlist: Playlist = {
-    id: crypto.randomUUID(),
-    tracks: [],
-    ...newPlaylist,
-  };
-
-  setPlaylists((current) => [playlist, ...current]);
-
+  createPlaylistInStore(newPlaylist);
   openWindow("playlists");
 }
 
@@ -226,42 +172,18 @@ function openPlaylistDetails(playlistId: string) {
 }
 
 function removeTrackFromPlaylist(playlistId: string, trackId: string) {
-  setPlaylists((currentPlaylists) =>
-    currentPlaylists.map((playlist) => {
-      if (playlist.id !== playlistId) {
-        return playlist;
-      }
-
-      return {
-        ...playlist,
-        tracks: playlist.tracks.filter((track) => track.id !== trackId),
-      };
-    }),
-  );
+  removeTrackFromPlaylistInStore(playlistId, trackId);
 }
 
 function updatePlaylist(
   playlistId: string,
   updatedPlaylist: Omit<Playlist, "id" | "tracks">,
 ) {
-  setPlaylists((currentPlaylists) =>
-    currentPlaylists.map((playlist) => {
-      if (playlist.id !== playlistId) {
-        return playlist;
-      }
-
-      return {
-        ...playlist,
-        ...updatedPlaylist,
-      };
-    }),
-  );
+  updatePlaylistInStore(playlistId, updatedPlaylist);
 }
 
 function deletePlaylist(playlistId: string) {
-  setPlaylists((currentPlaylists) =>
-    currentPlaylists.filter((playlist) => playlist.id !== playlistId),
-  );
+  deletePlaylistInStore(playlistId);
 
   if (selectedPlaylistId === playlistId) {
     setSelectedPlaylistId(null);
@@ -286,35 +208,9 @@ function selectQueueTrack(track: PlaylistTrack) {
   storeSelectQueueTrack(track);
 }
 
-function toggleFavoriteTrack(track: PlaylistTrack) {
-  const alreadyFavorite = favoriteTracks.some(
-    (favoriteTrack) => favoriteTrack.id === track.id,
-  );
-
-  // XP (+2) начисляем только при добавлении в избранное, не при удалении.
-  if (!alreadyFavorite) {
-    useProgressionStore.getState().registerFavoriteAdded();
-  }
-
-  setFavoriteTracks((currentFavorites) => {
-    const isFav = currentFavorites.some(
-      (favoriteTrack) => favoriteTrack.id === track.id,
-    );
-
-    if (isFav) {
-      return currentFavorites.filter(
-        (favoriteTrack) => favoriteTrack.id !== track.id,
-      );
-    }
-
-    return [track, ...currentFavorites];
-  });
-}
-
+/** Обёртка: UI вызывает по id, стор — по id (удаление из избранного). */
 function removeFavoriteTrack(trackId: string) {
-  setFavoriteTracks((currentFavorites) =>
-    currentFavorites.filter((track) => track.id !== trackId),
-  );
+  removeFavoriteTrackFromStore(trackId);
 }
 
 const isCurrentTrackFavorite = currentTrack
@@ -338,6 +234,7 @@ const isCurrentTrackFavorite = currentTrack
           onLogout={onLogout}
           onOpenDashboard={() => setIsDashboardOpen(true)}
           isDashboardOpen={isDashboardOpen}
+          onRequestSignIn={onRequestSignIn}
         />
 
         <section

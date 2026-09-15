@@ -5,6 +5,12 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>noctra</title>
+    <!--
+      Google Identity Services: нужен для One Tap и входа по idToken.
+      async defer — скрипт не блокирует отрисовку. Если загрузка не удалась,
+      кнопка входа автоматически уходит на OAuth-редирект (см. src/services/auth.ts).
+    -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
   <body>
     <div id="root"></div>

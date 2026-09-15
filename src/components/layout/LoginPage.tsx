@@ -1,8 +1,14 @@
 import { useState } from "react";
-import { AtSign } from "lucide-react";
+import { AtSign, Loader2, UserRound } from "lucide-react";
 import logo from "../../assets/noctra-logo.png";
 import bgLogin from "../../assets/bg-login.png";
 import { useT } from "../../i18n/useT";
+import { isSupabaseConfigured } from "../../lib/supabase";
+import {
+  signInAnonymously,
+  signInWithEmail,
+  signUpWithEmail,
+} from "../../lib/supabase/auth";
 
 type LoginPageProps = {
   onLogin: (registeredNick?: string) => void;
@@ -16,8 +22,17 @@ export function LoginPage({ onLogin }: LoginPageProps) {
   const [confirm, setConfirm] = useState("");
   const [nick, setNick] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [isBusy, setIsBusy] = useState(false);
 
-  function submit() {
+  /** Ошибки Supabase приходят кодами — переводим их в текст. */
+  function errorText(code: string): string {
+    const key = `login.error.${code}`;
+    const translated = t(key);
+    // Если ключа нет, t() вернёт сам ключ — тогда показываем общий текст.
+    return translated === key ? t("login.error.unknown") : translated;
+  }
+
+  async function submit() {
     setError(null);
 
     if (!email.trim() || !password) {
@@ -38,11 +53,61 @@ export function LoginPage({ onLogin }: LoginPageProps) {
         setError(t("login.error.passwordsMismatch"));
         return;
       }
-      onLogin(nick.trim());
+    }
+
+    // Локальный режим: Supabase не настроен, входим как раньше — по нику.
+    if (!isSupabaseConfigured) {
+      onLogin(mode === "register" ? nick.trim() : undefined);
       return;
     }
 
-    onLogin();
+    setIsBusy(true);
+
+    try {
+      const result =
+        mode === "register"
+          ? await signUpWithEmail(email.trim(), password, nick.trim())
+          : await signInWithEmail(email.trim(), password);
+
+      if (!result.ok) {
+        setError(errorText(result.code));
+        return;
+      }
+
+      if (result.needsEmailConfirm) {
+        setError(t("login.error.confirmEmail"));
+        return;
+      }
+
+      onLogin(mode === "register" ? nick.trim() : undefined);
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  /** Гостевой вход: анонимная сессия Supabase, данные всё равно синхронизируются. */
+  async function continueAsGuest() {
+    setError(null);
+
+    if (!isSupabaseConfigured) {
+      onLogin();
+      return;
+    }
+
+    setIsBusy(true);
+
+    try {
+      const result = await signInAnonymously();
+
+      if (!result.ok) {
+        setError(errorText(result.code));
+        return;
+      }
+
+      onLogin();
+    } finally {
+      setIsBusy(false);
+    }
   }
 
   const inputCls =
@@ -144,14 +209,29 @@ export function LoginPage({ onLogin }: LoginPageProps) {
           )}
 
           <button
-            onClick={submit}
-            className="w-full rounded-2xl border border-purple-300/30 bg-purple-500/25 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-purple-950/40 transition hover:bg-purple-500/35"
+            onClick={() => void submit()}
+            disabled={isBusy}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl border border-purple-300/30 bg-purple-500/25 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-purple-950/40 transition hover:bg-purple-500/35 disabled:cursor-not-allowed disabled:opacity-50"
           >
+            {isBusy && <Loader2 size={15} className="animate-spin" />}
             {mode === "login" ? t("login.enter") : t("login.create")}
           </button>
 
-          <button className="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-purple-100/65 transition hover:bg-white/[0.07] hover:text-white">
-            {t("login.telegram")}
+          <div className="flex items-center gap-3 py-1">
+            <span className="h-px flex-1 bg-white/10" />
+            <span className="text-[11px] uppercase tracking-widest text-purple-100/30">
+              {t("login.or")}
+            </span>
+            <span className="h-px flex-1 bg-white/10" />
+          </div>
+
+          <button
+            onClick={() => void continueAsGuest()}
+            disabled={isBusy}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-purple-100/65 transition hover:bg-white/[0.07] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <UserRound size={15} />
+            {t("login.guest")}
           </button>
         </div>
 

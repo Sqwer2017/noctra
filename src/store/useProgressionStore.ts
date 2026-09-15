@@ -11,6 +11,16 @@ import {
   getRankProgress,
 } from "../lib/ranks";
 import type { Rank, RankProgress } from "../lib/ranks";
+import { debounce } from "../lib/async";
+import { isSupabaseConfigured } from "../lib/supabase";
+import { currentUserId } from "../lib/supabase/sync";
+import { fetchProgression, pushProgression } from "../lib/supabase/profile";
+import { fetchListeningStats, pushListeningStats } from "../lib/supabase/stats";
+import {
+  fetchQuestProgress,
+  pushQuestClaimed,
+  pushQuestProgress,
+} from "../lib/supabase/quests";
 
 /** Локальная дата в формате YYYY-MM-DD. */
 export function todayKey(date = new Date()): string {
@@ -109,7 +119,89 @@ type ProgressionState = {
   getCurrentRank: () => Rank;
   getProgress: () => RankProgress;
   getQuestProgress: (id: QuestId) => number;
+
+  // ── синхронизация с облаком ───────────────────────────────────────
+  /** Подтягивает прогресс и статистику из БД (при входе). */
+  hydrateFromCloud: () => Promise<void>;
+  /** Принудительно отправляет накопленное (пауза, уход со страницы). */
+  flushToCloud: () => Promise<void>;
+  /** Сброс при выходе из аккаунта. */
+  resetLocal: () => void;
 };
+
+// ── Фоновая отправка в Supabase ───────────────────────────────────────
+//
+// Прослушивание тикает раз в секунду. Отправлять каждый тик нельзя — это
+// сотни запросов за сессию. Поэтому: локальный стейт меняется мгновенно,
+// а в облако уходит «склеенная» запись не чаще, чем раз в SYNC_INTERVAL_MS.
+//
+// 3 секунды — компромисс: при паузе в прослушивании прогресс уезжает почти
+// сразу, но за час непрерывной музыки набирается ~1200 записей вместо 3600.
+const SYNC_INTERVAL_MS = 3_000;
+
+/** Отправляет текущее состояние прогресса в облако. */
+async function syncProgressionNow(): Promise<void> {
+  if (!isSupabaseConfigured) return;
+
+  const userId = await currentUserId();
+  if (!userId) return;
+
+  const state = useProgressionStore.getState();
+  const { daily, historyMap, totalSecondsListened, totalTracksPlayed, totalXP } = state;
+
+  await pushProgression(userId, {
+    xp: totalXP,
+    dailyDate: daily.date,
+    listenedSeconds: daily.listenedSeconds,
+    favoritesAdded: daily.favoritesAdded,
+    completedTracks: daily.completedTracks,
+    playlistXpClaimed: daily.playlistXpClaimed,
+  });
+
+  await pushListeningStats({
+    totalSecondsListened,
+    totalTracksPlayed,
+    activeDaysCount: Object.keys(historyMap).length,
+    history: historyMap,
+  });
+}
+
+/**
+ * Дебаунс живёт на уровне модуля, а не в сторе: он не должен попадать
+ * в persist-снапшот и обязан быть общим для всех вызовов.
+ */
+const scheduleCloudSync = debounce(() => {
+  void syncProgressionNow();
+}, SYNC_INTERVAL_MS);
+
+/** Отправляет состояние одного задания (прогресс или факт награды). */
+async function persistQuest(id: QuestId, claimed: boolean): Promise<void> {
+  if (!isSupabaseConfigured) return;
+
+  const quest = QUESTS.find((q) => q.id === id);
+  if (!quest) return;
+
+  const state = useProgressionStore.getState();
+  const progress = state.getQuestProgress(id);
+
+  if (claimed) {
+    await pushQuestClaimed(id, state.daily.date, progress, quest.target);
+    return;
+  }
+
+  await pushQuestProgress(
+    id,
+    state.daily.date,
+    progress,
+    quest.target,
+    progress >= quest.target,
+  );
+}
+
+/** Синхронизирует прогресс квеста по его текущему значению. */
+async function syncQuestProgress(id: QuestId): Promise<void> {
+  await persistQuest(id, useProgressionStore.getState().daily.quests[id].claimed);
+}
 
 export const useProgressionStore = create<ProgressionState>()(
   persist(
@@ -155,6 +247,8 @@ export const useProgressionStore = create<ProgressionState>()(
           historyMap: { ...state.historyMap, [today]: nextMinutes },
           daily: { ...state.daily, listenedSeconds: nextDaySeconds },
         });
+
+        scheduleCloudSync();
       },
 
       registerTrackPlayed: () => {
@@ -162,6 +256,7 @@ export const useProgressionStore = create<ProgressionState>()(
         set((state) => ({
           totalTracksPlayed: state.totalTracksPlayed + 1,
         }));
+        scheduleCloudSync();
       },
 
       registerTrackCompleted: () => {
@@ -172,6 +267,7 @@ export const useProgressionStore = create<ProgressionState>()(
             completedTracks: state.daily.completedTracks + 1,
           },
         }));
+        void syncQuestProgress("nightMarathon");
       },
 
       registerFavoriteAdded: () => {
@@ -187,6 +283,9 @@ export const useProgressionStore = create<ProgressionState>()(
             favoritesAdded: state.daily.favoritesAdded + 1,
           },
         });
+
+        void syncQuestProgress("collector");
+        scheduleCloudSync();
       },
 
       registerPublicPlaylistComplete: (isPublic, trackCount) => {
@@ -200,6 +299,8 @@ export const useProgressionStore = create<ProgressionState>()(
           totalXP: state.totalXP + XP_PER_PLAYLIST,
           daily: { ...state.daily, playlistXpClaimed: true },
         });
+
+        scheduleCloudSync();
       },
 
       claimQuest: (id) => {
@@ -220,6 +321,11 @@ export const useProgressionStore = create<ProgressionState>()(
             },
           },
         });
+
+        // Награду фиксируем сразу, без дебаунса: это редкое и важное событие,
+        // а счётчик XP уже обновлён локально.
+        void persistQuest(id, true);
+        scheduleCloudSync();
       },
 
       getCurrentRank: () => getRankByXp(get().totalXP),
@@ -231,6 +337,81 @@ export const useProgressionStore = create<ProgressionState>()(
         if (id === "collector") return daily.favoritesAdded;
         return daily.completedTracks;
       },
+
+      hydrateFromCloud: async () => {
+        if (!isSupabaseConfigured) return;
+
+        const userId = await currentUserId();
+        if (!userId) return;
+
+        const [progression, stats, quests] = await Promise.all([
+          fetchProgression(userId),
+          fetchListeningStats(userId),
+          fetchQuestProgress(userId, todayKey()),
+        ]);
+
+        const patch: Partial<ProgressionState> = {};
+
+        if (progression) {
+          patch.totalXP = progression.xp ?? 0;
+
+          // Дневное состояние переносим, только если оно за сегодня —
+          // иначе локальный rollover сам обнулит счётчики.
+          if (progression.daily_date === todayKey()) {
+            patch.daily = {
+              date: progression.daily_date,
+              listenedSeconds: progression.daily_listened_seconds ?? 0,
+              favoritesAdded: progression.daily_favorites_added ?? 0,
+              completedTracks: progression.daily_completed_tracks ?? 0,
+              playlistXpClaimed: Boolean(progression.playlist_xp_claimed),
+              quests: {
+                immersion: { claimed: false },
+                collector: { claimed: false },
+                nightMarathon: { claimed: false },
+              },
+            };
+          }
+        }
+
+        if (stats) {
+          patch.totalSecondsListened = stats.totalSecondsListened;
+          patch.totalTracksPlayed = stats.totalTracksPlayed;
+          patch.historyMap = stats.history;
+        }
+
+        // Статусы наград берём из таблицы квестов — она точнее.
+        for (const row of quests) {
+          const id = row.quest_id as QuestId;
+          if (!QUESTS.some((quest) => quest.id === id)) continue;
+
+          const base = patch.daily ?? get().daily;
+          patch.daily = {
+            ...base,
+            quests: {
+              ...base.quests,
+              [id]: { claimed: Boolean(row.claimed_at) },
+            },
+          };
+        }
+
+        set(patch);
+      },
+
+      flushToCloud: async () => {
+        // Сбрасываем отложенный таймер и пишем немедленно: вызывается на
+        // паузе и при уходе со страницы, когда ждать 15 секунд нельзя.
+        scheduleCloudSync.cancel();
+        await syncProgressionNow();
+      },
+
+      resetLocal: () =>
+        set({
+          totalXP: 0,
+          totalSecondsListened: 0,
+          totalTracksPlayed: 0,
+          historyMap: {},
+          daily: freshDay(),
+        }),
     }),
     {
       name: "noctra.progression",
