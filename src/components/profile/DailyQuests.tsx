@@ -28,6 +28,9 @@ export function DailyQuests() {
   );
   const [claimingId, setClaimingId] = useState<QuestId | null>(null);
 
+  /** Награду не выдала база — показываем пояснение вместо молчания. */
+  const [claimError, setClaimError] = useState<string | null>(null);
+
   // Общий тикающий таймер до полуночи.
   const [secondsLeft, setSecondsLeft] = useState(() => secondsUntilTomorrow());
   useEffect(() => {
@@ -49,9 +52,23 @@ export function DailyQuests() {
     setClaimingId(id);
     setClaimFx({ id, xp: rewardXP });
 
+    /*
+     * Решение о начислении принимает база, поэтому показываем анимацию,
+     * но результат берём из ответа: если награда уже была забрана (например,
+     * в другой вкладке или до перезагрузки), опыт не начислится, и обещать
+     * его в анимации нельзя — только если база подтвердила выдачу.
+     */
     window.setTimeout(() => {
-      claimQuest(id);
-      setClaimingId(null);
+      void claimQuest(id).then((granted) => {
+        setClaimingId(null);
+
+        if (!granted) {
+          // Награда не выдана — убираем анимацию и объясняем причину.
+          setClaimFx(null);
+          setClaimError(t("quest.claimUnavailable"));
+          window.setTimeout(() => setClaimError(null), 4000);
+        }
+      });
     }, 550);
 
     window.setTimeout(() => setClaimFx(null), 1400);
@@ -171,7 +188,20 @@ export function DailyQuests() {
         })}
       </div>
 
-      {/* Модалка с подробностями */}
+      {/* Пояснение, если база не выдала награду: молчание выглядело бы
+          как поломка кнопки. */}
+      <AnimatePresence>
+        {claimError && (
+          <motion.p
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            className="mt-2 rounded-lg border border-amber-300/25 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100/80"
+          >
+            {claimError}
+          </motion.p>
+        )}
+      </AnimatePresence>
       {infoQuestData && (
         <QuestInfoModal
           quest={infoQuestData}

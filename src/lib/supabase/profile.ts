@@ -4,7 +4,6 @@ import { nickToHandle } from "../profile";
 import type { ProfileRepository } from "../profile";
 import type { ProfileRow, ProfilePayload } from "./mappers";
 import { syncWrite } from "./sync";
-import { getLevelByXp, getRankByXp } from "../ranks";
 
 /**
  * Supabase-адаптер профиля.
@@ -281,37 +280,23 @@ function pickString(value: unknown): string {
 }
 
 /**
- * Пишет прогрессию в профиль. Вызывать с дебаунсом: во время прослушивания
- * значение меняется каждую секунду.
+ * Пишет прогрессию в профиль.
+ *
+ * Вызывается из троттлинга стора, поэтому во время прослушивания уходит
+ * не чаще раза в несколько секунд. Принимает уже готовый набор колонок:
+ * так снимок прогрессии формируется один раз и одинаково попадает и в запрос,
+ * и в очередь повтора — иначе при сбое в очередь мог уйти устаревший снимок
+ * и откатить более свежее значение.
  */
 export async function pushProgression(
   userId: string,
-  progress: {
-    xp: number;
-    dailyDate: string;
-    listenedSeconds: number;
-    favoritesAdded: number;
-    completedTracks: number;
-    playlistXpClaimed: boolean;
-  },
+  columns: Record<string, unknown>,
 ): Promise<void> {
-  const rank = getRankByXp(progress.xp);
-
   await syncWrite(
     {
       kind: "profile:update",
       at: Date.now(),
-      payload: {
-        xp: progress.xp,
-        level: getLevelByXp(progress.xp),
-        rank_tier: rank.tier,
-        rank_name: rank.id,
-        daily_date: progress.dailyDate,
-        daily_listened_seconds: progress.listenedSeconds,
-        daily_favorites_added: progress.favoritesAdded,
-        daily_completed_tracks: progress.completedTracks,
-        playlist_xp_claimed: progress.playlistXpClaimed,
-      },
+      payload: columns,
     },
     async () => {
       const client = requireSupabase();
@@ -327,17 +312,7 @@ export async function pushProgression(
        */
       const { data, error } = await client
         .from("profiles")
-        .update({
-          xp: progress.xp,
-          level: getLevelByXp(progress.xp),
-          rank_tier: rank.tier,
-          rank_name: rank.id,
-          daily_date: progress.dailyDate,
-          daily_listened_seconds: progress.listenedSeconds,
-          daily_favorites_added: progress.favoritesAdded,
-          daily_completed_tracks: progress.completedTracks,
-          playlist_xp_claimed: progress.playlistXpClaimed,
-        })
+        .update(columns)
         .eq("id", userId)
         .select("id");
 

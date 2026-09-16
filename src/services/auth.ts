@@ -166,6 +166,20 @@ export async function signInWithEmail(
   return { ok: true };
 }
 
+/**
+ * Регистрация по email и паролю.
+ *
+ * Письма мы пока не отправляем, поэтому подтверждение почты должно быть
+ * выключено на стороне Supabase (Authentication → Sign In / Providers →
+ * Email → «Confirm email» = OFF). Тогда `signUp` сразу возвращает сессию,
+ * и человек попадает в приложение без ожидания ссылки.
+ *
+ * Но полагаться на настройку проекта нельзя: она может остаться включённой,
+ * а тогда регистрация выглядела бы сломанной — «проверьте почту», письма нет,
+ * войти нельзя. Поэтому если сессии не пришло, пробуем войти тем же паролем:
+ * при выключенном подтверждении это сработает, а при включённом мы честно
+ * сообщим, что нужен вход (а не будем делать вид, что всё хорошо).
+ */
 export async function signUpWithEmail(
   email: string,
   password: string,
@@ -186,7 +200,25 @@ export async function signUpWithEmail(
 
   if (error) return { ok: false, code: mapError(error) };
 
-  return { ok: true, needsEmailConfirm: !data.session };
+  // Сессия есть — подтверждение почты выключено, вход выполнен.
+  if (data.session) return { ok: true };
+
+  /*
+   * Сессии нет: либо включено подтверждение почты, либо пользователь уже
+   * существовал (Supabase не сообщает об этом явно, отдавая пустой ответ
+   * ради защиты от перебора адресов).
+   *
+   * Пробуем войти — при уже созданном аккаунте это и есть нужное действие.
+   */
+  const { error: signInError } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+
+  if (!signInError) return { ok: true };
+
+  // Войти не вышло: значит, аккаунт действительно ждёт подтверждения письма.
+  return { ok: true, needsEmailConfirm: true };
 }
 
 export async function signInAnonymously(): Promise<AuthResult> {

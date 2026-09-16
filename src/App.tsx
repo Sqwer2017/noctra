@@ -10,7 +10,7 @@ import { nickToHandle } from "./lib/profile";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
 import { signOut } from "./services/auth";
 import { flushSyncQueue, watchConnectivity } from "./lib/supabase/sync";
-import { ensureProfileFromAuthMetadata } from "./lib/supabase/profile";
+import { ensureProfileFromAuthMetadata, ProfileError } from "./lib/supabase/profile";
 import { disableGoogleAutoSelect } from "./lib/google";
 import { ACHIEVEMENTS } from "./lib/achievements";
 import { useAppStore } from "./store/useAppStore";
@@ -83,17 +83,63 @@ export default function App() {
   useEffect(() => {
     if (!isAuthenticated || !isSupabaseConfigured) return;
 
-    void useLibraryStore.getState().hydrateFromCloud();
-    void useProgressionStore.getState().hydrateFromCloud();
+    let cancelled = false;
 
-    // Достижения грузим после прогрессии: их выдача зависит от статистики,
-    // поэтому к моменту проверки счётчики уже актуальны.
-    void useProgressionStore
-      .getState()
-      .flushToCloud()
-      .then(() => useAchievementsStore.getState().refresh());
+    void useLibraryStore.getState().hydrateFromCloud();
+
+    /*
+     * Порядок здесь принципиален: СНАЧАЛА читаем облако, ПОТОМ пишем.
+     *
+     * И пишем ТОЛЬКО если чтение прошло успешно.
+     *
+     * Раньше обе операции запускались параллельно, а гидратация при
+     * недоступной сессии молча выходила. Вызывающий не знал об этом,
+     * синхронизация продолжалась — и в базу уходило локальное состояние,
+     * которое после выхода из аккаунта было обнулено. Так прогресс пропадал
+     * при перезаходе: в профиле было 28 XP, в базе оставался 0.
+     *
+     * Теперь hydrate возвращает признак успеха, и запись выполняется только
+     * после реально прочитанных данных.
+     */
+    void (async () => {
+      /*
+       * Повторяем чтение, если сессия ещё не успела установиться.
+       *
+       * Событие входа приходит раньше, чем клиент Supabase заканчивает
+       * восстановление сессии, поэтому первая попытка может не найти userId.
+       * Без повтора гидратация просто не состоялась бы — и синхронизация
+       * не запускалась вовсе.
+       */
+      let hydrated = false;
+
+      for (let attempt = 0; attempt < 5 && !cancelled; attempt++) {
+        hydrated = await useProgressionStore.getState().hydrateFromCloud();
+        if (hydrated) break;
+
+        await new Promise((resolve) => window.setTimeout(resolve, 300));
+      }
+
+      if (cancelled) return;
+
+      if (!hydrated) {
+        // Прочитать не удалось — писать нельзя, иначе затрём облако.
+        console.warn(
+          "[sync] запись пропущена: облако не прочитано за 5 попыток",
+        );
+        return;
+      }
+
+      await useProgressionStore.getState().flushToCloud();
+      await useAchievementsStore.getState().refresh();
+    })().catch((error: unknown) => {
+      console.warn("[sync] синхронизация при входе не завершилась:", error);
+    });
 
     void flushSyncQueue();
+
+    return () => {
+      cancelled = true;
+    };
   }, [isAuthenticated]);
 
   /*
@@ -112,11 +158,29 @@ export default function App() {
     if (!nextId) return;
 
     const achievement = ACHIEVEMENTS.find((item) => item.id === nextId);
-    useAchievementsStore.getState().dismissNotification();
+    if (!achievement) {
+      // Незнакомый код — просто убираем из очереди, показывать нечего.
+      useAchievementsStore.getState().dismissNotification();
+      return;
+    }
 
-    if (!achievement) return;
+    /*
+     * Убираем из очереди ТОЛЬКО когда тост уже ушёл с экрана.
+     *
+     * Раньше dismissNotification() вызывался сразу после spotlightToast.
+     * Это меняло массив pendingNotifications, эффект перезапускался, React
+     * пересобирал узел — и AnimatePresence не успевал проиграть ни появление,
+     * ни исчезновение: уведомление просто мигало. Теперь очередь двигается
+     * по истечении времени показа, и анимации доходят до конца.
+     */
+    const LIFETIME_MS = 6000;
+    spotlightToast(<AchievementToast achievement={achievement} />, LIFETIME_MS);
 
-    spotlightToast(<AchievementToast achievement={achievement} />, 6000);
+    const timer = window.setTimeout(() => {
+      useAchievementsStore.getState().dismissNotification();
+    }, LIFETIME_MS);
+
+    return () => window.clearTimeout(timer);
   }, [pendingAchievements]);
 
   // Возвращение сети — повод дослать отложенные операции.
@@ -151,21 +215,39 @@ export default function App() {
   }, []);
 
   // Регистрация с ником: сразу создаём/обновляем профиль под юзером,
-  // чтобы ни ведение соответствовало нику, введённому на форме.
+  // чтобы ник и тег соответствовали введённым на форме.
   const handleEnter = useCallback(async (registeredNick?: string) => {
     const { loadCurrentUser: ensure, updateProfile } = useAppStore.getState();
 
+    // Профиль создаётся триггером в БД; это же подтягивает его в стор.
     await ensure();
 
     if (registeredNick && registeredNick.trim()) {
+      const nick = registeredNick.trim();
+
       try {
-        await updateProfile({
-          nick: registeredNick.trim(),
-          handle: nickToHandle(registeredNick),
-        });
-      } catch {
-        // Профиль уже создан триггером в БД — не блокируем вход из-за
-        // неудавшегося переименования.
+        await updateProfile({ nick, handle: nickToHandle(nick) });
+      } catch (error) {
+        /*
+         * Тег занят — добавляем числовой суффикс.
+         *
+         * Тег уникален в базе, и это правильно: по нему люди находят друг
+         * друга. Но отказывать в регистрации из-за совпадения нельзя — человек
+         * просто выбрал популярное имя. Раньше ошибка молча глоталась, и
+         * профиль оставался с техническим ником от триггера: снаружи это
+         * выглядело так, будто введённое имя потерялось.
+         */
+        if (error instanceof ProfileError && error.code === "tag_taken") {
+          const fallback = `${nickToHandle(nick)}${Math.floor(
+            Math.random() * 9000 + 1000,
+          )}`;
+
+          try {
+            await updateProfile({ nick, handle: fallback });
+          } catch {
+            // Ник останется заданный триггером — вход не блокируем.
+          }
+        }
       }
     }
 
@@ -204,9 +286,24 @@ export default function App() {
   // После успешного входа из модалки подтягиваем данные в облаке.
   const handleAuthenticated = useCallback(() => {
     setIsAuthenticated(true);
+
+    // Тот же порядок, что и при старте: сначала читаем, потом пишем.
     void useLibraryStore.getState().hydrateFromCloud();
-    void useProgressionStore.getState().hydrateFromCloud();
+    void useAchievementsStore.getState().refresh();
     void useAppStore.getState().loadCurrentUser();
+
+    void useProgressionStore
+      .getState()
+      .hydrateFromCloud()
+      .then((hydrated) => {
+        // См. комментарий в эффекте входа: без прочитанного облака не пишем.
+        if (!hydrated) return;
+
+        return useProgressionStore.getState().flushToCloud();
+      })
+      .catch((error: unknown) => {
+        console.warn("[sync] синхронизация после входа не завершилась:", error);
+      });
   }, []);
 
   // Пока проверяем сессию, показываем заглушку — иначе экран логина мигнёт

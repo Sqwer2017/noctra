@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AmbientBackground } from "../common/AmbientBackground";
 import { BottomPlayer } from "./BottomPlayer";
@@ -73,72 +73,93 @@ export function AppShell({ onLogout, onRequestSignIn }: AppShellProps) {
   }, [registerPlayerOpener]);
 
   /** Делегируем в стор: он синхронизирует изменения с Supabase. */
-  function addTrackToPlaylist(playlistId: string, track: PlaylistTrack) {
-    addTrackToPlaylistInStore(playlistId, track);
-  }
+  const addTrackToPlaylist = useCallback(
+    (playlistId: string, track: PlaylistTrack) => {
+      addTrackToPlaylistInStore(playlistId, track);
+    },
+    [addTrackToPlaylistInStore],
+  );
 
-  function openWindow(windowId: WindowId) {
-  if (windowId === "player") {
-    setIsPlayerClosing(false);
-    setIsPlayerOpen(true);
-    return;
-  }
-
-  setClosingWindows((current) => current.filter((id) => id !== windowId));
-
-  setOpenedWindows((currentWindows) => {
-    if (currentWindows.includes(windowId)) {
-      return currentWindows;
-    }
-
-    const nextWindows = [...currentWindows, windowId];
-
-    if (nextWindows.length > MAX_REGULAR_WINDOWS) {
-      return nextWindows.slice(nextWindows.length - MAX_REGULAR_WINDOWS);
-    }
-
-    return nextWindows;
-  });
-
-  setActiveWindow(windowId);
-}
-
-  function closeWindow(windowId: WindowId) {
-  if (windowId === "player") {
-    if (!isPlayerOpen || isPlayerClosing) {
+  const openWindow = useCallback((windowId: WindowId) => {
+    if (windowId === "player") {
+      setIsPlayerClosing(false);
+      setIsPlayerOpen(true);
       return;
     }
 
-    setIsPlayerClosing(true);
+    setClosingWindows((current) => current.filter((id) => id !== windowId));
 
-    window.setTimeout(() => {
-      setIsPlayerOpen(false);
-      setIsPlayerClosing(false);
-    }, 320);
-
-    return;
-  }
-
-  if (closingWindows.includes(windowId)) {
-    return;
-  }
-
-  setClosingWindows((current) => [...current, windowId]);
-
-  window.setTimeout(() => {
     setOpenedWindows((currentWindows) => {
-      const nextWindows = currentWindows.filter((id) => id !== windowId);
+      if (currentWindows.includes(windowId)) {
+        return currentWindows;
+      }
 
-      if (activeWindow === windowId) {
-        setActiveWindow(nextWindows[nextWindows.length - 1] ?? null);
+      const nextWindows = [...currentWindows, windowId];
+
+      if (nextWindows.length > MAX_REGULAR_WINDOWS) {
+        return nextWindows.slice(nextWindows.length - MAX_REGULAR_WINDOWS);
       }
 
       return nextWindows;
     });
 
-    setClosingWindows((current) => current.filter((id) => id !== windowId));
-  }, 320);
-}
+    setActiveWindow(windowId);
+  }, []);
+
+  /*
+   * Стабильная ссылка нужна из-за чтения состояния внутри setTimeout:
+   * берём актуальные значения из замыкания через функциональные обновления,
+   * а `isPlayerOpen`/`closingWindows`/`activeWindow` читаем по ссылкам-рефам,
+   * чтобы не пересоздавать колбэк на каждый рендер.
+   */
+  const isPlayerOpenRef = useRef(isPlayerOpen);
+  const isPlayerClosingRef = useRef(isPlayerClosing);
+  const closingWindowsRef = useRef(closingWindows);
+  const activeWindowRef = useRef(activeWindow);
+
+  useEffect(() => {
+    isPlayerOpenRef.current = isPlayerOpen;
+    isPlayerClosingRef.current = isPlayerClosing;
+    closingWindowsRef.current = closingWindows;
+    activeWindowRef.current = activeWindow;
+  });
+
+  const closeWindow = useCallback((windowId: WindowId) => {
+    if (windowId === "player") {
+      if (!isPlayerOpenRef.current || isPlayerClosingRef.current) {
+        return;
+      }
+
+      setIsPlayerClosing(true);
+
+      window.setTimeout(() => {
+        setIsPlayerOpen(false);
+        setIsPlayerClosing(false);
+      }, 320);
+
+      return;
+    }
+
+    if (closingWindowsRef.current.includes(windowId)) {
+      return;
+    }
+
+    setClosingWindows((current) => [...current, windowId]);
+
+    window.setTimeout(() => {
+      setOpenedWindows((currentWindows) => {
+        const nextWindows = currentWindows.filter((id) => id !== windowId);
+
+        if (activeWindowRef.current === windowId) {
+          setActiveWindow(nextWindows[nextWindows.length - 1] ?? null);
+        }
+
+        return nextWindows;
+      });
+
+      setClosingWindows((current) => current.filter((id) => id !== windowId));
+    }, 320);
+  }, []);
 
   const openedWithSpecials: WindowId[] = isPlayerOpen
     ? [...openedWindows, "player"]
@@ -204,16 +225,6 @@ export function AppShell({ onLogout, onRequestSignIn }: AppShellProps) {
     return () => window.clearInterval(id);
   }, []);
 
-function createPlaylist(newPlaylist: Omit<Playlist, "id" | "tracks">) {
-  createPlaylistInStore(newPlaylist);
-  openWindow("playlists");
-}
-
-function openPlaylistDetails(playlistId: string) {
-  setSelectedPlaylistId(playlistId);
-  openWindow("playlist-details");
-}
-
 function removeTrackFromPlaylist(playlistId: string, trackId: string) {
   removeTrackFromPlaylistInStore(playlistId, trackId);
 }
@@ -234,27 +245,67 @@ function deletePlaylist(playlistId: string) {
   }
 }
 
-function playTrack(track: PlaylistTrack, queue: PlaylistTrack[] = [track]) {
-  storePlayTrack(track, queue);
-  setIsPlayerOpen(true);
-}
-
-function playNextTrack() {
+/*
+ * Колбэки, которые уходят в плеер, обязаны иметь СТАБИЛЬНУЮ ссылку.
+ *
+ * AppShell перерисовывается на любое изменение стора (лайк, пауза, открытие
+ * профиля). Если передавать обычные функции, у них каждый раз новая ссылка,
+ * и эффекты в плеере перезапускаются — а перезапуск эффекта смены трека
+ * делает pause() + load(), то есть откатывает трек на начало. Именно из-за
+ * этого пауза не работала: нажатие меняло состояние, рендер перезапускал
+ * эффект, и трек начинался заново.
+ */
+const playNextTrack = useCallback(() => {
   storePlayNext();
-}
+}, [storePlayNext]);
 
-function playPreviousTrack() {
+const playPreviousTrack = useCallback(() => {
   storePlayPrevious();
-}
+}, [storePlayPrevious]);
 
-function selectQueueTrack(track: PlaylistTrack) {
-  storeSelectQueueTrack(track);
-}
+const closePlayer = useCallback(() => {
+  closeWindow("player");
+}, [closeWindow]);
+
+/** Играть трек: стабильная ссылка — уходит в список треков и в плеер. */
+const playTrack = useCallback(
+  (track: PlaylistTrack, queue: PlaylistTrack[] = [track]) => {
+    storePlayTrack(track, queue);
+    setIsPlayerOpen(true);
+  },
+  [storePlayTrack],
+);
+
+const selectQueueTrack = useCallback(
+  (track: PlaylistTrack) => {
+    storeSelectQueueTrack(track);
+  },
+  [storeSelectQueueTrack],
+);
+
+const createPlaylist = useCallback(
+  (newPlaylist: Omit<Playlist, "id" | "tracks">) => {
+    createPlaylistInStore(newPlaylist);
+    openWindow("playlists");
+  },
+  [createPlaylistInStore, openWindow],
+);
+
+const openPlaylistDetails = useCallback(
+  (playlistId: string) => {
+    setSelectedPlaylistId(playlistId);
+    openWindow("playlist-details");
+  },
+  [openWindow],
+);
 
 /** Обёртка: UI вызывает по id, стор — по id (удаление из избранного). */
-function removeFavoriteTrack(trackId: string) {
-  removeFavoriteTrackFromStore(trackId);
-}
+const removeFavoriteTrack = useCallback(
+  (trackId: string) => {
+    removeFavoriteTrackFromStore(trackId);
+  },
+  [removeFavoriteTrackFromStore],
+);
 
 const isCurrentTrackFavorite = currentTrack
   ? favoriteTracks.some((track) => track.id === currentTrack.id)
@@ -333,7 +384,7 @@ const isCurrentTrackFavorite = currentTrack
               isCurrentTrackFavorite={isCurrentTrackFavorite}
               isClosing={isPlayerClosing}
               onToggleFavoriteTrack={toggleFavoriteTrack}
-              onClose={() => closeWindow("player")} />
+              onClose={closePlayer} />
           )}
         </section>
       </div>

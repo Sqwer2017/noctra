@@ -152,12 +152,33 @@ async function runQueuedOperation(
     }
 
     case "profile:update": {
-      // updated_at проставит триггер profiles_set_updated_at.
-      const { error } = await supabase
+      /*
+       * Обновляем только поля из payload этого снимка.
+       *
+       * Снимок прогрессии уходит в очередь при сбое сети, и между сбоем и
+       * повтором пользователь успевает набрать ещё XP. Если бы повтор писал
+       * устаревший снимок целиком, он откатил бы более свежее значение —
+       * именно так прогресс и «терялся через раз». Здесь же записывается
+       * ровно то, что было отправлено.
+       *
+       * `.select()` позволяет отличить «обновили» от «строки нет»: PostgREST
+       * на UPDATE без него отдаёт успех, даже когда не совпала ни одна строка,
+       * и потеря записи оставалась незамеченной.
+       *
+       * updated_at проставит триггер profiles_set_updated_at.
+       */
+      const { data, error } = await supabase
         .from("profiles")
         .update(op.payload)
-        .eq("id", userId);
+        .eq("id", userId)
+        .select("id");
+
       if (error) throw error;
+
+      if (!data || data.length === 0) {
+        throw new Error(`profiles: строка ${userId} не найдена`);
+      }
+
       return;
     }
 

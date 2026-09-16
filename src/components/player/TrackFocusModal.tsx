@@ -49,8 +49,6 @@ export function TrackFocusModal({
 
   if (typeof document === "undefined") return null;
 
-  const layoutId = track ? `cover-${track.id}` : "cover-empty";
-
   function handleMouseMove(event: React.MouseEvent) {
     const el = cardRef.current;
     if (!el) return;
@@ -89,7 +87,10 @@ export function TrackFocusModal({
           >
             <motion.div
               ref={cardRef}
-              layoutId={layoutId}
+              initial={{ scale: 0.72, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.8, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 260, damping: 26 }}
               onMouseMove={handleMouseMove}
               onMouseLeave={resetTilt}
               style={{

@@ -212,12 +212,39 @@ export function BottomPlayer({
     return () => window.clearInterval(id);
   }, [isPlaying]);
 
+  /**
+   * Смена трека: перезагрузка потока и запуск воспроизведения.
+   *
+   * ЭФФЕКТ ЗАВИСИТ ТОЛЬКО ОТ САМОГО ТРЕКА — это принципиально.
+   *
+   * Раньше в зависимостях были `setIsPlayingInStore` и `onNextTrack`, а также
+   * `onClose`/`onToggleFavoriteTrack` в соседних эффектах. Эти колбэки приходят
+   * из AppShell обычными функциями: у них новая ссылка на КАЖДОМ рендере
+   * AppShell. А AppShell перерисовывается на любое изменение стора — лайк,
+   * пауза, открытие профиля, тик прогрессии.
+   *
+   * Итог: эффект перезапускался от любого клика, и каждый запуск делал
+   * `pause()` + `load()`, то есть откатывал трек на 0:00. Пауза не работала
+   * в принципе — нажатие меняло состояние, это вызывало рендер, рендер
+   * перезапускал эффект, эффект начинал трек заново.
+   *
+   * Значения, которые нужны внутри, читаем через ref-ы: так эффект остаётся
+   * привязанным к смене трека и не реагирует на пересоздание колбэков.
+   */
+  const nextTrackRef = useRef(onNextTrack);
+  const setIsPlayingRef = useRef(setIsPlayingInStore);
+
+  useEffect(() => {
+    nextTrackRef.current = onNextTrack;
+    setIsPlayingRef.current = setIsPlayingInStore;
+  });
+
   useEffect(() => {
     setCurrentTime(0);
     setAudioDuration(0);
 
     if (!audioRef.current || !currentTrack?.streamUrl) {
-      setIsPlayingInStore(false);
+      setIsPlayingRef.current(false);
       shouldAutoPlayRef.current = false;
       return;
     }
@@ -278,14 +305,15 @@ export function BottomPlayer({
       // Восстановиться не удалось — честно сообщаем и идём дальше.
       console.error("[player] трек недоступен, переключаем на следующий");
       setPlaybackError(true);
-      setIsPlayingInStore(false);
+      setIsPlayingRef.current(false);
 
       // Переходим дальше, иначе плеер останется мёртвым на этом треке.
-      onNextTrack();
+      nextTrackRef.current();
     }, LOAD_TIMEOUT_MS);
 
     return () => window.clearTimeout(watchdog);
-  }, [currentTrack?.id, currentTrack?.streamUrl, setIsPlayingInStore, onNextTrack]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTrack?.id, currentTrack?.streamUrl]);
 
   function handleSeek(event: ChangeEvent<HTMLInputElement>) {
     if (!audioRef.current || !hasAudioSource) return;
@@ -491,6 +519,17 @@ export function BottomPlayer({
         }`}
       >
         <audio
+          /*
+           * `key` прибит к id трека и НЕ меняется при перерисовках родителя.
+           *
+           * Без явного ключа React иногда пересоздавал элемент, когда менялся
+           * состав соседних узлов (например, открывался/закрывался слой профиля
+           * или список достижений). Новый <audio> начинал загрузку с нуля —
+           * трек «перезапускался» от любого клика. Теперь узел один и тот же,
+           * пока играет один и тот же трек; смена источника идёт только через
+           * атрибут src.
+           */
+          key="noctra-audio"
           ref={audioRef}
           src={currentTrack?.streamUrl}
           preload="metadata"
@@ -755,14 +794,31 @@ export function BottomPlayer({
         </div>
       )}
 
+      {/*
+        Обложка — обычная кнопка, без общего layoutId с модалкой фокуса.
+
+        Раньше здесь стоял `layoutId={`cover-${currentTrack.id}`}`, и такой же
+        layoutId объявлялся в TrackFocusModal. AnimatePresence держит узел
+        модалки в дереве и после её закрытия, поэтому два элемента с одинаковым
+        layoutId существовали одновременно, и Framer Motion начинал «делить»
+        между ними один DOM-узел. Из-за этого КАЖДОЕ изменение стора (клик по
+        лайку, закрытие профиля, переключение избранного) пересобирало
+        <audio>: плеер видел новый узел, вызывал load() и трек начинал играть
+        с начала.
+
+        Плавное «вылетание» карточки сохранено за счёт пружинной анимации
+        появления самой модалки — она того же размера и на том же месте.
+      */}
       <motion.button
         type="button"
-        layoutId={currentTrack ? `cover-${currentTrack.id}` : "cover-empty"}
         onClick={() => {
           if (currentTrack) setIsFocusOpen(true);
         }}
         disabled={!currentTrack}
         title={currentTrack ? t("player.focusMode") : undefined}
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.96 }}
+        transition={{ type: "spring", stiffness: 420, damping: 26 }}
         className="h-14 w-14 shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-purple-500/40 to-black shadow-lg shadow-purple-950/30 transition hover:ring-2 hover:ring-purple-300/40 disabled:cursor-default"
       >
         {currentTrack?.coverUrl ? (

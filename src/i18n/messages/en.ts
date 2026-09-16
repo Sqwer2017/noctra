@@ -56,6 +56,8 @@ const en = {
   "auth.modal.subtitle":
     "Sign in to keep your progress, favorites and playlists in the cloud and available on any device.",
   "auth.signInWithGoogle": "Continue with Google",
+  "auth.googleButtonHint":
+    "Quick sign-in is unavailable in this browser — use the Google button above",
   "auth.close": "Close",
 
   "topbar.modules": "{count}/{max} modules",
@@ -206,6 +208,8 @@ const en = {
   "quest.title": "Daily quests",
   "quest.claim": "Claim XP",
   "quest.claimed": "Reward claimed!",
+  "quest.claimUnavailable":
+    "Reward isn't available yet: progress hasn't been confirmed by the server. Try again a bit later.",
   "quest.immersion": "Immersion",
   "quest.collector": "Collector",
   "quest.nightMarathon": "Night marathon",

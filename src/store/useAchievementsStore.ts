@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
 import { ACHIEVEMENTS, ACHIEVEMENTS_TOTAL } from "../lib/achievements";
 import type { AchievementDef, AchievementMetrics } from "../lib/achievements";
@@ -15,13 +16,23 @@ import {
  * асинхронно и живут своей жизнью (загрузка, обновление, уведомления).
  * Смешивать их с XP и статистикой было бы тесно.
  *
- * Не персистится: источник правды — база, а локальная копия нужна только
- * на время сессии. Иначе после смены аккаунта остались бы чужие достижения.
+ * Персистится только `seen`: список тех достижений, о которых пользователю
+ * уже сообщили. Без него уведомление показывалось при КАЖДОМ заходе —
+ * база отдаёт весь список открытых, клиент сравнивал его с пустым состоянием
+ * после перезагрузки и считал все достижения «новыми». Сами открытые
+ * достижения не персистятся: их источник правды — база.
  */
 
 type AchievementsState = {
   /** Коды открытых достижений. */
   unlocked: string[];
+  /**
+   * Достижения, о которых пользователю уже сообщили.
+   *
+   * Именно этот список, а не `unlocked`, определяет, показывать ли
+   * уведомление: он переживает перезагрузку.
+   */
+  seen: string[];
   /** Идёт загрузка из базы. */
   isLoading: boolean;
   /** Развёрнут ли полный список достижений в профиле. */
@@ -45,57 +56,96 @@ type AchievementsState = {
   reset: () => void;
 };
 
-export const useAchievementsStore = create<AchievementsState>()((set, get) => ({
-  unlocked: [],
-  isLoading: false,
-  isExpanded: false,
-  pendingNotifications: [],
+export const useAchievementsStore = create<AchievementsState>()(
+  persist(
+    (set, get) => ({
+      unlocked: [],
+      seen: [],
+      isLoading: false,
+      isExpanded: false,
+      pendingNotifications: [],
 
-  setExpanded: (value) => set({ isExpanded: value }),
+      setExpanded: (value) => set({ isExpanded: value }),
 
-  load: async () => {
-    if (!isSupabaseConfigured) return;
+      load: async () => {
+        if (!isSupabaseConfigured) return;
 
-    set({ isLoading: true });
+        set({ isLoading: true });
 
-    try {
-      const ids = await fetchUnlockedAchievements();
-      set({ unlocked: ids });
-    } finally {
-      set({ isLoading: false });
-    }
-  },
+        try {
+          const ids = await fetchUnlockedAchievements();
+          set({ unlocked: ids });
+        } finally {
+          set({ isLoading: false });
+        }
+      },
 
-  refresh: async () => {
-    if (!isSupabaseConfigured) return;
+      refresh: async () => {
+        if (!isSupabaseConfigured) return;
 
-    // Просим базу пересчитать условия, затем читаем актуальный список.
-    await requestAchievementCheck();
+        // Просим базу пересчитать условия, затем читаем актуальный список.
+        await requestAchievementCheck();
 
-    const previous = get().unlocked;
-    const ids = await fetchUnlockedAchievements();
+        const ids = await fetchUnlockedAchievements();
 
-    // Новые достижения ставим в очередь на показ.
-    const previousSet = new Set(previous);
-    const fresh = ids.filter((id) => !previousSet.has(id));
+        /*
+         * «Новое» = открыто в базе, но о нём ещё не сообщали.
+         *
+         * Первый вход (seen пуст) — исключение: молча помечаем всё уже
+         * открытое как показанное, иначе человек при первом заходе получил бы
+         * двадцать уведомлений подряд о достижениях, которые заработал раньше.
+         * Награда за них уже получена, сообщать не о чем — эффект был бы
+         * обратным: не праздник, а спам.
+         */
+        const seen = get().seen;
+        const seenSet = new Set(seen);
 
-    set({
-      unlocked: ids,
-      pendingNotifications:
-        fresh.length > 0
-          ? [...get().pendingNotifications, ...fresh]
-          : get().pendingNotifications,
-    });
-  },
+        if (seenSet.size === 0 && ids.length > 0) {
+          set({ unlocked: ids, seen: ids });
+          return;
+        }
 
-  dismissNotification: () =>
-    set((state) => ({
-      pendingNotifications: state.pendingNotifications.slice(1),
-    })),
+        const fresh = ids.filter((id) => !seenSet.has(id));
 
-  reset: () =>
-    set({ unlocked: [], pendingNotifications: [], isLoading: false }),
-}));
+        set({
+          unlocked: ids,
+          // Помечаем показанными СРАЗУ, не дожидаясь закрытия тоста: иначе
+          // перезагрузка во время показа вернула бы уведомление снова.
+          seen: fresh.length > 0 ? [...seen, ...fresh] : seen,
+          pendingNotifications:
+            fresh.length > 0
+              ? [...get().pendingNotifications, ...fresh]
+              : get().pendingNotifications,
+        });
+      },
+
+      dismissNotification: () =>
+        set((state) => ({
+          pendingNotifications: state.pendingNotifications.slice(1),
+        })),
+
+      reset: () =>
+        set({
+          unlocked: [],
+          seen: [],
+          pendingNotifications: [],
+          isLoading: false,
+        }),
+    }),
+    {
+      name: "noctra.achievements",
+      /*
+       * Храним только `seen` и состояние раскрытия списка.
+       * `unlocked` намеренно не персистим: после смены аккаунта в кэше
+       * остались бы чужие достижения, а источник правды — база.
+       */
+      partialize: (state) => ({
+        seen: state.seen,
+        isExpanded: state.isExpanded,
+      }),
+    },
+  ),
+);
 
 /** Открыто ли конкретное достижение. */
 export function useIsAchievementUnlocked(id: string): boolean {

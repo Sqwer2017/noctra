@@ -193,40 +193,126 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 GRANT EXECUTE ON FUNCTION public.check_achievements_for_me() TO authenticated;
 
--- ── 8. Триггеры ───────────────────────────────────────────────────────-- Выдача при обновлении статистики (основной путь: прослушивание,
--- стрики, сессии) и при изменении избранного/плейлистов/профиля.
-CREATE OR REPLACE FUNCTION public.trg_check_achievements()
-RETURNS TRIGGER AS $$
+-- ── 8. Триггеры ───────────────────────────────────────────────────────
+--
+-- Выдача при обновлении статистики (основной путь: прослушивание, стрики,
+-- сессии) и при изменении избранного/плейлистов/профиля.
+--
+-- ВНИМАНИЕ: этот раздел ИСПРАВЛЕН миграцией 009.
+--
+-- Изначально обработчик был один на все таблицы и брал пользователя как
+-- `COALESCE(NEW.user_id, NEW.id)`. У таблицы playlist_tracks нет ни того,
+-- ни другого: владелец определяется через playlists. Обращение к
+-- несуществующему полю записи — ошибка времени выполнения, поэтому падало
+-- ЛЮБОЕ обновление с сообщением:
+--
+--   record "new" has no field "user_id"
+--
+-- Здесь оставлены РАБОЧИЕ версии обработчиков, чтобы миграция 005 была
+-- самодостаточной и её можно было применять на чистой базе без 009.
+
+CREATE OR REPLACE FUNCTION public.safe_check_achievements(p_user_id UUID)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
-  PERFORM public.check_achievements(COALESCE(NEW.user_id, NEW.id));
+  IF p_user_id IS NULL THEN
+    RETURN;
+  END IF;
+
+  PERFORM public.check_achievements(p_user_id);
+EXCEPTION
+  WHEN OTHERS THEN
+    -- Достижения — дополнительная механика: их сбой не должен откатывать
+    -- запись прогресса пользователя.
+    RAISE WARNING 'check_achievements для % не выполнена: % (%)',
+      p_user_id, SQLERRM, SQLSTATE;
+END;
+$$;
+
+/** Обработчик для таблиц с колонкой user_id. */
+CREATE OR REPLACE FUNCTION public.trg_check_achievements_user_id()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  PERFORM public.safe_check_achievements(NEW.user_id);
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
+
+/** Обработчик для profiles: идентификатор пользователя в колонке id. */
+CREATE OR REPLACE FUNCTION public.trg_check_achievements_profiles()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  PERFORM public.safe_check_achievements(NEW.id);
+  RETURN NEW;
+END;
+$$;
+
+/** Обработчик для playlist_tracks: владелец определяется через playlists. */
+CREATE OR REPLACE FUNCTION public.trg_check_achievements_playlist_tracks()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_user_id UUID;
+BEGIN
+  -- У playlist_tracks нет user_id, поэтому ищем владельца плейлиста.
+  -- При удалении строки сам плейлист ещё существует, но берём OLD —
+  -- для DELETE актуальна именно удаляемая запись.
+  IF TG_OP = 'DELETE' THEN
+    SELECT user_id INTO v_user_id
+      FROM public.playlists WHERE id = OLD.playlist_id;
+  ELSE
+    SELECT user_id INTO v_user_id
+      FROM public.playlists WHERE id = NEW.playlist_id;
+  END IF;
+
+  PERFORM public.safe_check_achievements(v_user_id);
+
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
 
 DROP TRIGGER IF EXISTS user_stats_check_achievements ON public.user_stats;
 CREATE TRIGGER user_stats_check_achievements
   AFTER INSERT OR UPDATE ON public.user_stats
-  FOR EACH ROW EXECUTE FUNCTION public.trg_check_achievements();
+  FOR EACH ROW EXECUTE FUNCTION public.trg_check_achievements_user_id();
 
 DROP TRIGGER IF EXISTS favorites_check_achievements ON public.favorites;
 CREATE TRIGGER favorites_check_achievements
   AFTER INSERT OR DELETE ON public.favorites
-  FOR EACH ROW EXECUTE FUNCTION public.trg_check_achievements();
+  FOR EACH ROW EXECUTE FUNCTION public.trg_check_achievements_user_id();
 
 DROP TRIGGER IF EXISTS playlists_check_achievements ON public.playlists;
 CREATE TRIGGER playlists_check_achievements
   AFTER INSERT OR DELETE ON public.playlists
-  FOR EACH ROW EXECUTE FUNCTION public.trg_check_achievements();
+  FOR EACH ROW EXECUTE FUNCTION public.trg_check_achievements_user_id();
 
 DROP TRIGGER IF EXISTS playlist_tracks_check_achievements ON public.playlist_tracks;
 CREATE TRIGGER playlist_tracks_check_achievements
   AFTER INSERT OR DELETE ON public.playlist_tracks
-  FOR EACH ROW EXECUTE FUNCTION public.trg_check_achievements();
+  FOR EACH ROW EXECUTE FUNCTION public.trg_check_achievements_playlist_tracks();
 
 DROP TRIGGER IF EXISTS profiles_check_achievements ON public.profiles;
 CREATE TRIGGER profiles_check_achievements
   AFTER UPDATE ON public.profiles
-  FOR EACH ROW EXECUTE FUNCTION public.trg_check_achievements();
+  FOR EACH ROW EXECUTE FUNCTION public.trg_check_achievements_profiles();
 
 -- ═══════════════════════════════════════════════════════════════════════
 --  ПРОВЕРКА после применения:

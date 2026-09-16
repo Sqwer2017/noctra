@@ -21,10 +21,9 @@ import { AmbientBackground } from "../common/AmbientBackground";
 import {
   signInAnonymously,
   signInWithEmail,
-  signInWithGoogle,
   signUpWithEmail,
 } from "../../services/auth";
-import { GoogleButton } from "../auth/GoogleButton";
+import { GoogleSignInButton } from "../auth/GoogleSignInButton";
 import { FloatingField } from "../auth/FloatingField";
 import { PasswordStrength } from "../auth/PasswordStrength";
 import { scorePassword } from "../auth/password-score";
@@ -171,38 +170,6 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     }
   }
 
-  async function handleGoogle() {
-    setFormError(null);
-
-    /*
-     * Если Supabase не настроен, раньше здесь молча вызывался onLogin() —
-     * человек думал, что вошёл через Google, а на деле получал гостя без
-     * аккаунта и без синхронизации. Теперь честно говорим, что вход
-     * недоступен, и объясняем причину.
-     */
-    if (!isSupabaseConfigured) {
-      fail(t("login.error.supabase_not_configured"));
-      return;
-    }
-
-    setIsBusy(true);
-
-    try {
-      const result = await signInWithGoogle();
-
-      if (!result.ok) {
-        fail(errorText(result.code));
-        return;
-      }
-
-      // One Tap входит без перезагрузки страницы — сразу переходим в приложение.
-      setIsSuccess(true);
-      window.setTimeout(() => onLogin(), 420);
-    } finally {
-      setIsBusy(false);
-    }
-  }
-
   async function continueAsGuest() {
     setFormError(null);
 
@@ -316,11 +283,18 @@ export function LoginPage({ onLogin }: LoginPageProps) {
             </div>
 
             <div className="space-y-4">
-              {/* Google — первым: это основной способ входа */}
-              <GoogleButton
-                onClick={() => void handleGoogle()}
-                isLoading={isBusy}
-                label={t("auth.signInWithGoogle")}
+              {/*
+                Google — первым: это основной способ входа.
+                Компонент сам решает, показать One Tap или официальную кнопку
+                Google: One Tap может быть заблокирован настройками браузера.
+              */}
+              <GoogleSignInButton
+                onSuccess={() => {
+                  setIsSuccess(true);
+                  window.setTimeout(() => onLogin(), 420);
+                }}
+                onError={fail}
+                width={320}
               />
 
               <div className="flex items-center gap-3 py-0.5">

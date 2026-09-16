@@ -2,11 +2,10 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 import {
-  FAVORITE_XP_DAILY_CAP,
   PLAYLIST_MIN_TRACKS,
-  XP_PER_FAVORITE,
   XP_PER_LISTEN_SECONDS,
   XP_PER_PLAYLIST,
+  getLevelByXp,
   getRankByXp,
   getRankProgress,
 } from "../lib/ranks";
@@ -17,8 +16,8 @@ import { currentUserId } from "../lib/supabase/sync";
 import { fetchProgression, pushProgression } from "../lib/supabase/profile";
 import { fetchListeningStats, pushListeningStats } from "../lib/supabase/stats";
 import {
+  claimQuestReward,
   fetchQuestProgress,
-  pushQuestClaimed,
   pushQuestProgress,
 } from "../lib/supabase/quests";
 
@@ -60,7 +59,13 @@ type DailyState = {
   date: string;
   /** Секунды прослушивания за день (для квеста «Погружение» и XP). */
   listenedSeconds: number;
-  /** Добавлений в избранное за день (для квеста и лимита XP). */
+  /**
+   * Добавлений в избранное за день — для квеста «Коллекционер».
+   *
+   * Считает именно действия за день, поэтому растёт при каждом добавлении.
+   * XP за избранное начисляется по другому списку (см. `favoriteXpTrackIds`):
+   * платить за повторное добавление одного и того же трека нельзя.
+   */
   favoritesAdded: number;
   /** Полностью прослушанные треки за день (для «Ночного марафона»). */
   completedTracks: number;
@@ -94,6 +99,15 @@ type ProgressionState = {
   totalTracksPlayed: number;
   /** Минуты прослушивания по дням: { 'YYYY-MM-DD': minutes }. */
   historyMap: Record<string, number>;
+  /**
+   * Треки, за добавление в избранное которых XP уже начислен.
+   *
+   * Ключ — id трека, значение — когда начислили. Нужен, чтобы лайк нельзя
+   * было абузить: снял лайк и поставил снова — это по-прежнему один и тот же
+   * трек, и второй раз за него платить не за что. Хранится постоянно, а не
+   * только на день: иначе абуз просто откладывался бы до полуночи.
+   */
+  favoriteXpTrackIds: Record<string, string>;
   /** Дневное состояние (XP-лимиты, прогресс квестов). */
   daily: DailyState;
 
@@ -109,12 +123,26 @@ type ProgressionState = {
    * «Ночной марафон»: переключения и паузы в статистику не попадают.
    */
   registerTrackCompleted: () => void;
-  /** Добавление в избранное: квест + XP (с дневным лимитом). */
-  registerFavoriteAdded: () => void;
+  /**
+   * Добавление в избранное: квест + XP за уникальный трек.
+   *
+   * `trackId` обязателен: без него нельзя понять, платили ли за этот трек
+   * раньше, и награда снова станет абузной.
+   *
+   * `awardedXp` приходит от базы (0, если за трек уже награждали или достигнут
+   * дневной лимит). Именно она решает, положен ли опыт, — клиент лишь
+   * применяет ответ, поэтому подделать начисление через DevTools нельзя.
+   */
+  registerFavoriteAdded: (trackId: string, awardedXp: number) => void;
   /** Публичный плейлист с ≥10 треками: +15 XP раз в сутки. */
   registerPublicPlaylistComplete: (isPublic: boolean, trackCount: number) => void;
-  /** Забрать награду за квест (если выполнен и не забран). */
-  claimQuest: (id: QuestId) => void;
+  /**
+   * Забрать награду за квест (если выполнен и не забран).
+   *
+   * Асинхронный: решение о начислении принимает база, чтобы награду нельзя
+   * было получить дважды. Возвращает true, если опыт действительно начислен.
+   */
+  claimQuest: (id: QuestId) => Promise<boolean>;
   /** Сбросить дневное состояние, если наступил новый день. */
   rolloverIfNeeded: () => void;
 
@@ -124,8 +152,14 @@ type ProgressionState = {
   getQuestProgress: (id: QuestId) => number;
 
   // ── синхронизация с облаком ───────────────────────────────────────
-  /** Подтягивает прогресс и статистику из БД (при входе). */
-  hydrateFromCloud: () => Promise<void>;
+  /**
+   * Подтягивает прогресс и статистику из БД (при входе).
+   *
+   * Возвращает `true`, если данные прочитаны. Пока это не так, писать
+   * в облако нельзя: локальное состояние может быть обнулено после выхода
+   * из аккаунта, и запись затрёт реальный прогресс.
+   */
+  hydrateFromCloud: () => Promise<boolean>;
   /** Принудительно отправляет накопленное (пауза, уход со страницы). */
   flushToCloud: () => Promise<void>;
   /** Запись при скрытии вкладки — надёжнее, чем beforeunload. */
@@ -146,31 +180,86 @@ type ProgressionState = {
 // уходит в базу даже во время непрерывного прослушивания.
 const SYNC_INTERVAL_MS = 3_000;
 
+/**
+ * Признак того, что запись уже идёт.
+ *
+ * Троттлинг ограничивает ЧАСТОТУ запусков, но не мешает двум вызовам
+ * наложиться: первый ещё пишет в сеть, а второй уже стартовал. Два параллельных
+ * снимка прогрессии применяются в непредсказуемом порядке — более старый может
+ * перезаписать более свежий. Именно это давало эффект «сохраняется через раз».
+ *
+ * Поэтому записи строго последовательны, а последнее состояние, пришедшее
+ * во время записи, отправляется сразу после её окончания. Ожидающий вызов
+ * ровно один — повторные не копятся, важно лишь «догнать» актуальное значение.
+ */
+let isSyncing = false;
+let isResyncQueued = false;
+
 /** Отправляет текущее состояние прогресса в облако. */
 async function syncProgressionNow(): Promise<void> {
   if (!isSupabaseConfigured) return;
 
+  if (isSyncing) {
+    // Запись уже идёт: помечаем, что после неё нужен ещё один проход.
+    isResyncQueued = true;
+    return;
+  }
+
   const userId = await currentUserId();
   if (!userId) return;
 
-  const state = useProgressionStore.getState();
-  const { daily, historyMap, totalSecondsListened, totalTracksPlayed, totalXP } = state;
+  isSyncing = true;
 
-  await pushProgression(userId, {
-    xp: totalXP,
-    dailyDate: daily.date,
-    listenedSeconds: daily.listenedSeconds,
-    favoritesAdded: daily.favoritesAdded,
-    completedTracks: daily.completedTracks,
-    playlistXpClaimed: daily.playlistXpClaimed,
-  });
+  try {
+    const state = useProgressionStore.getState();
+    const { daily, historyMap, totalSecondsListened, totalTracksPlayed, totalXP } =
+      state;
 
-  await pushListeningStats({
-    totalSecondsListened,
-    totalTracksPlayed,
-    activeDaysCount: Object.keys(historyMap).length,
-    history: historyMap,
-  });
+    /*
+     * Снимок прогрессии.
+     *
+     * Формируем ЗАРАНЕЕ и передаём один и тот же набор колонок и в запрос,
+     * и в очередь повтора. Операции идемпотентны (пишут конкретные значения,
+     * а не приращения), поэтому повторная отправка не задваивает счётчики,
+     * и устаревший снимок не может попасть в очередь.
+     */
+    const rank = getRankByXp(totalXP);
+
+    const progressionColumns = {
+      xp: totalXP,
+      level: getLevelByXp(totalXP),
+      rank_tier: rank.tier,
+      rank_name: rank.id,
+      daily_date: daily.date,
+      daily_listened_seconds: daily.listenedSeconds,
+      daily_favorites_added: daily.favoritesAdded,
+      daily_completed_tracks: daily.completedTracks,
+      playlist_xp_claimed: daily.playlistXpClaimed,
+    };
+
+    /*
+     * Записи идут ПОСЛЕДОВАТЕЛЬНО, а не через Promise.all.
+     *
+     * Два параллельных upsert'а в разные таблицы — это две конкурирующие
+     * транзакции. При обрыве связи одна могла примениться, а вторая попасть
+     * в очередь: состояние расходилось, и часть прогресса выглядела потерянной.
+     */
+    await pushProgression(userId, progressionColumns);
+    await pushListeningStats({
+      totalSecondsListened,
+      totalTracksPlayed,
+      activeDaysCount: Object.keys(historyMap).length,
+      history: historyMap,
+    });
+  } finally {
+    isSyncing = false;
+
+    // Во время записи накопились изменения — догоняем их.
+    if (isResyncQueued) {
+      isResyncQueued = false;
+      void syncProgressionNow();
+    }
+  }
 }
 
 /**
@@ -201,33 +290,17 @@ function mergeHistory(
   return merged;
 }
 
-/** Отправляет состояние одного задания (прогресс или факт награды). */
-async function persistQuest(id: QuestId, claimed: boolean): Promise<void> {
+/** Отправляет состояние одного задания (только прогресс). */
+async function persistQuestProgress(id: QuestId): Promise<void> {
   if (!isSupabaseConfigured) return;
 
-  const quest = QUESTS.find((q) => q.id === id);
-  if (!quest) return;
-
   const state = useProgressionStore.getState();
-  const progress = state.getQuestProgress(id);
-
-  if (claimed) {
-    await pushQuestClaimed(id, state.daily.date, progress, quest.target);
-    return;
-  }
-
-  await pushQuestProgress(
-    id,
-    state.daily.date,
-    progress,
-    quest.target,
-    progress >= quest.target,
-  );
+  await pushQuestProgress(id, state.daily.date, state.getQuestProgress(id));
 }
 
 /** Синхронизирует прогресс квеста по его текущему значению. */
 async function syncQuestProgress(id: QuestId): Promise<void> {
-  await persistQuest(id, useProgressionStore.getState().daily.quests[id].claimed);
+  await persistQuestProgress(id);
 }
 
 export const useProgressionStore = create<ProgressionState>()(
@@ -237,6 +310,7 @@ export const useProgressionStore = create<ProgressionState>()(
       totalSecondsListened: 0,
       totalTracksPlayed: 0,
       historyMap: {},
+      favoriteXpTrackIds: {},
       daily: freshDay(),
 
       rolloverIfNeeded: () => {
@@ -301,14 +375,33 @@ export const useProgressionStore = create<ProgressionState>()(
         scheduleCloudSync();
       },
 
-      registerFavoriteAdded: () => {
+      registerFavoriteAdded: (trackId, awardedXp) => {
         get().rolloverIfNeeded();
+
+        /*
+         * XP за избранное начисляется ОДИН РАЗ ЗА ТРЕК — и решает это база.
+         *
+         * Раньше опыт давался за каждое добавление, и это абузилось в два
+         * клика: лайк (+2 XP) → снятие лайка → лайк снова (+2 XP). Дневной
+         * лимит проблему не решал — он лишь ограничивал скорость: 10 XP
+         * набирались пятью кликами по одному и тому же треку.
+         *
+         * Теперь сумму присылает база (0, если за трек уже платили), а стор
+         * лишь применяет её. Локальный список `favoriteXpTrackIds` нужен как
+         * быстрый фильтр, чтобы не ждать ответа сети для повторных лайков.
+         *
+         * Квест «Коллекционер» продолжает считать действия за день — ему
+         * нужны именно добавления, а не уникальные треки.
+         */
+        const alreadyRewarded = Boolean(get().favoriteXpTrackIds[trackId]);
         const state = get();
-        const canGainXp =
-          state.daily.favoritesAdded < FAVORITE_XP_DAILY_CAP;
+        const canGainXp = awardedXp > 0 && !alreadyRewarded;
 
         set({
-          totalXP: state.totalXP + (canGainXp ? XP_PER_FAVORITE : 0),
+          totalXP: state.totalXP + (canGainXp ? awardedXp : 0),
+          favoriteXpTrackIds: canGainXp
+            ? { ...state.favoriteXpTrackIds, [trackId]: todayKey() }
+            : state.favoriteXpTrackIds,
           daily: {
             ...state.daily,
             favoritesAdded: state.daily.favoritesAdded + 1,
@@ -334,29 +427,99 @@ export const useProgressionStore = create<ProgressionState>()(
         scheduleCloudSync();
       },
 
-      claimQuest: (id) => {
+      /**
+       * Забирает награду за задание.
+       *
+       * Ключевой момент: решение принимает БАЗА, а не клиент.
+       *
+       * Раньше флаг «награда забрана» жил только в localStorage, а запись
+       * уходила в фон. Перезагрузка страницы могла случиться раньше, чем
+       * запрос доходил до базы: в облаке отметки не было, задание снова
+       * выглядело незабранным — и опыт начислялся повторно. Так можно было
+       * накручивать XP сколько угодно раз.
+       *
+       * Теперь клиент просит базу выдать награду (claim_quest), и та:
+       *   * блокирует строку — двойной клик и две вкладки не проходят;
+       *   * проверяет, что цель достигнута;
+       *   * начисляет XP атомарно ровно один раз в сутки.
+       *
+       * Локально применяем ТОЛЬКО то, что подтвердила база: если она ответила
+       * «уже забрано», опыт не начисляем, а состояние помечаем собранным —
+       * так интерфейс сам себя чинит после перезагрузки.
+       */
+      claimQuest: async (id) => {
         get().rolloverIfNeeded();
+
         const state = get();
         const quest = QUESTS.find((q) => q.id === id);
-        if (!quest) return;
-        if (state.daily.quests[id].claimed) return;
-        if (get().getQuestProgress(id) < quest.target) return;
+        if (!quest) return false;
 
-        set({
-          totalXP: state.totalXP + quest.rewardXP,
-          daily: {
-            ...state.daily,
-            quests: {
-              ...state.daily.quests,
-              [id]: { claimed: true },
+        // Локальная проверка — только чтобы не дёргать сеть зря.
+        if (state.daily.quests[id].claimed) return false;
+        if (get().getQuestProgress(id) < quest.target) return false;
+
+        /** Помечает задание собранным локально (без начисления XP). */
+        const markClaimed = () => {
+          set((current) => ({
+            daily: {
+              ...current.daily,
+              quests: { ...current.daily.quests, [id]: { claimed: true } },
             },
-          },
-        });
+          }));
+        };
 
-        // Награду фиксируем сразу, без дебаунса: это редкое и важное событие,
-        // а счётчик XP уже обновлён локально.
-        void persistQuest(id, true);
-        scheduleCloudSync();
+        if (!isSupabaseConfigured) {
+          // Локальный режим: база недоступна, работаем как раньше.
+          set((current) => ({
+            totalXP: current.totalXP + quest.rewardXP,
+            daily: {
+              ...current.daily,
+              quests: { ...current.daily.quests, [id]: { claimed: true } },
+            },
+          }));
+          return true;
+        }
+
+        const result = await claimQuestReward(id, state.daily.date);
+
+        if (result.granted) {
+          /*
+           * Опыт берём из ответа базы, а не из своего конфига: так локальное
+           * значение совпадает с облачным. Если база вернула итоговый XP,
+           * доверяем ему — это защищает от расхождений при начислении
+           * с другого устройства.
+           */
+          set((current) => ({
+            totalXP:
+              result.totalXp !== null
+                ? Math.max(current.totalXP, result.totalXp)
+                : current.totalXP + result.awardedXp,
+            daily: {
+              ...current.daily,
+              quests: { ...current.daily.quests, [id]: { claimed: true } },
+            },
+          }));
+
+          scheduleCloudSync();
+          return true;
+        }
+
+        /*
+         * Награда не выдана. Разбираем причины:
+         *  - already_claimed: база помнит сбор, которого не помнит клиент
+         *    (перезагрузка до записи) — просто синхронизируем состояние;
+         *  - not_completed / no_progress: цель не подтверждена базой;
+         *  - error: функция недоступна (миграция не применена) или сеть.
+         *
+         * В последнем случае НЕ помечаем задание собранным: иначе награда
+         * потерялась бы навсегда — сначала «забрано» локально, а в базе
+         * по-прежнему пусто.
+         */
+        if (result.reason === "already_claimed") {
+          markClaimed();
+        }
+
+        return false;
       },
 
       getCurrentRank: () => getRankByXp(get().totalXP),
@@ -369,11 +532,30 @@ export const useProgressionStore = create<ProgressionState>()(
         return daily.completedTracks;
       },
 
-      hydrateFromCloud: async () => {
-        if (!isSupabaseConfigured) return;
+      /**
+       * Подтягивает прогресс и статистику из БД (при входе).
+       *
+       * Возвращает `true`, если данные действительно прочитаны. Это важно для
+       * вызывающего: пока облако не прочитано, писать в него НЕЛЬЗЯ.
+       *
+       * Раньше метод ничего не возвращал, а при отсутствии сессии просто
+       * выходил. Вызывающий не мог отличить «прочитали» от «не прочитали»,
+       * продолжал синхронизацию — и записывал в базу локальное состояние,
+       * которое после выхода из аккаунта было обнулено. Именно так прогресс
+       * пропадал при перезаходе (было 28 XP, стало 0 в базе).
+       */
+      hydrateFromCloud: async (): Promise<boolean> => {
+        if (!isSupabaseConfigured) return false;
 
         const userId = await currentUserId();
-        if (!userId) return;
+        if (!userId) {
+          // Сессия ещё не установилась. Сообщаем об этом вызывающему —
+          // запись в облако он должен пропустить, иначе затрёт данные.
+          console.warn(
+            "[sync] гидратация пропущена: сессия ещё не готова",
+          );
+          return false;
+        }
 
         const [progression, stats, quests] = await Promise.all([
           fetchProgression(userId),
@@ -445,7 +627,14 @@ export const useProgressionStore = create<ProgressionState>()(
           patch.historyMap = mergeHistory(local.historyMap, stats.history);
         }
 
-        // Статусы наград берём из таблицы квестов — она точнее.
+        /*
+         * Статусы наград берём из таблицы квестов — она авторитетнее локального
+         * состояния, потому что именно она защищает от повторного сбора.
+         *
+         * `claimed` выставляем строго по наличию claimed_at: если база помнит
+         * сбор, а клиент после перезагрузки — нет, кнопка «Забрать» не должна
+         * снова стать активной.
+         */
         for (const row of quests) {
           const id = row.quest_id as QuestId;
           if (!QUESTS.some((quest) => quest.id === id)) continue;
@@ -461,13 +650,44 @@ export const useProgressionStore = create<ProgressionState>()(
         }
 
         set(patch);
+
+        /*
+         * Досылаем прогресс заданий, у которых ещё нет строки в базе.
+         *
+         * Без строки claim_quest ответит «no_progress» и награду не выдаст:
+         * функция принципиально не начисляет опыт по данным, которых не видит.
+         * Так задание, выполненное офлайн, не теряет награду — прогресс
+         * доедет до базы, и забрать её можно будет со следующего захода.
+         */
+        const known = new Set(quests.map((row) => row.quest_id));
+        for (const quest of QUESTS) {
+          if (known.has(quest.id)) continue;
+          await syncQuestProgress(quest.id);
+        }
+
+        // Данные прочитаны — с этого момента писать в облако безопасно.
+        return true;
       },
 
       flushToCloud: async () => {
-        // Гасим отложенный вызов и пишем немедленно: вызывается при уходе
-        // со страницы и выходе из аккаунта, когда ждать окно троттлинга нельзя.
+        /*
+         * Гасим отложенный вызов и пишем немедленно: метод вызывается при
+         * уходе со страницы и выходе из аккаунта, когда ждать окно троттлинга
+         * нельзя.
+         *
+         * Если запись уже идёт, syncProgressionNow не отбросит наше намерение,
+         * а запомнит его и выполнит сразу после текущей — поэтому ожидание
+         * ниже действительно дожидается отправки актуального состояния.
+         */
         scheduleCloudSync.cancel();
         await syncProgressionNow();
+
+        // Догоняющий проход мог быть поставлен в очередь уже после нашего
+        // await — даём ему завершиться, иначе при выходе из аккаунта запись
+        // осталась бы в полёте, а сессия уже погашена.
+        while (isSyncing || isResyncQueued) {
+          await new Promise((resolve) => window.setTimeout(resolve, 50));
+        }
       },
 
       /**
@@ -494,6 +714,7 @@ export const useProgressionStore = create<ProgressionState>()(
           totalSecondsListened: 0,
           totalTracksPlayed: 0,
           historyMap: {},
+          favoriteXpTrackIds: {},
           daily: freshDay(),
         }),
     }),
@@ -504,6 +725,9 @@ export const useProgressionStore = create<ProgressionState>()(
         totalSecondsListened: state.totalSecondsListened,
         totalTracksPlayed: state.totalTracksPlayed,
         historyMap: state.historyMap,
+        // Список оплаченных лайков обязан переживать перезагрузку: иначе
+        // после F5 защита от абуза сбрасывалась бы вместе с ним.
+        favoriteXpTrackIds: state.favoriteXpTrackIds,
         daily: state.daily,
       }),
     },

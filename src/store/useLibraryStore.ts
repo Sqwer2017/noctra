@@ -133,10 +133,20 @@ export const useLibraryStore = create<LibraryState>()(  persist(
           favoriteTracks: [track, ...state.favoriteTracks],
         }));
 
-        // XP начисляем только за добавление, не за снятие лайка.
-        useProgressionStore.getState().registerFavoriteAdded();
-
-        void addFavorite(track);
+        /*
+         * XP за избранное решает БАЗА, а не клиент.
+         *
+         * addFavorite возвращает фактически начисленную сумму: 2 за новый
+         * трек и 0, если за этот трек уже платили. Раньше клиент безусловно
+         * начислял +2 за каждое добавление, и опыт абузился парой кликов
+         * по сердечку (поставил → снял → поставил).
+         *
+         * Квест «Коллекционер» считает действия независимо от награды —
+         * ему нужны добавления, а не уникальные треки.
+         */
+        void addFavorite(track).then((awardedXp) => {
+          useProgressionStore.getState().registerFavoriteAdded(track.id, awardedXp);
+        });
       },
 
       removeFavoriteTrack: (trackId) => {
