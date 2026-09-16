@@ -18,7 +18,7 @@ import {
 
 import { useAppStore } from "../../store/useAppStore";
 import { usePlayerStore } from "../../store/usePlayerStore";
-import { useProgressionStore } from "../../store/useProgressionStore";
+import { useProgressionStore, collectActiveDays } from "../../store/useProgressionStore";
 import { useLibraryStore } from "../../store/useLibraryStore";
 import { useT } from "../../i18n/useT";
 import { TrackCover } from "../tracks/TrackCover";
@@ -35,6 +35,12 @@ import {
 } from "../../store/useAchievementsStore";
 import { AchievementTile } from "./AchievementTile";
 import { formatListeningTime } from "../../lib/format";
+import {
+  computeActiveDaysDelta,
+  computeDailyDelta,
+  countActiveDaysThisWeek,
+} from "../../lib/statPeriods";
+import type { StatDelta } from "../../lib/statPeriods";
 import { getRankByXp, getRankProgress } from "../../lib/ranks";
 import { getFrequencyLevels, resumeAnalyser } from "../../audio/analyser";
 import { isSupabaseConfigured } from "../../lib/supabase";
@@ -911,6 +917,9 @@ function Corners() {
 
 /* ── 3B. Overall stats ──────────────────────────────────────────────── */
 
+/** Дней в неделе — знаменатель для плитки «Дней активности». */
+const ACTIVE_DAYS_PER_WEEK = 7;
+
 function StatsGrid({
   favoriteCount,
   onOpenListening,
@@ -922,44 +931,75 @@ function StatsGrid({
   const totalSecondsListened = useProgressionStore((s) => s.totalSecondsListened);
   const totalTracksPlayed = useProgressionStore((s) => s.totalTracksPlayed);
   const historyMap = useProgressionStore((s) => s.historyMap);
-  const activeDays = Object.keys(historyMap).length;
+  const tracksByDay = useProgressionStore((s) => s.tracksByDay);
+  const favoritesByDay = useProgressionStore((s) => s.favoritesByDay);
 
-  // Реальная дельта «сегодня vs вчера» по минутам прослушивания.
-  const delta = computeTodayDelta(historyMap);
+  /*
+   * Активные дни — объединение всех дневных историй.
+   *
+   * Одного времени прослушивания мало: человек мог в этот день только
+   * добавлять треки в избранное. Такой день тоже активный, и считать его
+   * нужно — иначе метрика занижалась бы.
+   */
+  const activeDates = collectActiveDays(historyMap, tracksByDay, favoritesByDay);
+  const totalActiveDays = activeDates.length;
 
-  // TODO(db): для треков/избранного/дней суточной истории пока нет —
-  // показываем NEW, пока не появятся агрегаты по этим метрикам.
+  /*
+   * Период сравнения зависит от метрики.
+   *
+   * Время, треки и избранное — ежедневные действия, сравниваем сегодня
+   * со вчера. Дни активности — про охват недели, поэтому сравниваем
+   * текущую неделю с прошлой и показываем «3 / 7».
+   */
+  const listeningDelta = computeDailyDelta(historyMap);
+  const tracksDelta = computeDailyDelta(tracksByDay);
+  const favoritesDelta = computeDailyDelta(favoritesByDay);
+  const activeDaysDelta = computeActiveDaysDelta(activeDates);
+  const activeThisWeek = countActiveDaysThisWeek(activeDates);
+
   const stats: {
     icon: string;
     label: string;
     value: string;
-    delta: { percent: number | null; direction: "up" | "down" | "new" };
+    delta: StatDelta;
+    /** Период сравнения — показывается подписью у бейджа. */
+    period: string;
     onClick?: () => void;
   }[] = [
     {
       icon: "🎧",
       label: t("dash.listeningHours"),
       value: formatListeningTime(totalSecondsListened, t),
-      delta,
+      delta: listeningDelta,
+      period: t("dash.period.today"),
       onClick: onOpenListening,
     },
     {
       icon: "💿",
       label: t("dash.tracksPlayed"),
       value: totalTracksPlayed.toLocaleString(),
-      delta: { percent: null, direction: "new" },
+      delta: tracksDelta,
+      period: t("dash.period.today"),
     },
     {
       icon: "❤️",
       label: t("dash.likedTracks"),
       value: favoriteCount.toLocaleString(),
-      delta: { percent: null, direction: "new" },
+      delta: favoritesDelta,
+      period: t("dash.period.today"),
     },
     {
       icon: "📅",
       label: t("dash.activeDays"),
-      value: activeDays.toLocaleString(),
-      delta: { percent: null, direction: "new" },
+      // Показываем охват недели: «3 / 7» читается сразу, в отличие от «3».
+      value: t("dash.activeDaysValue", {
+        current: activeThisWeek,
+        total: ACTIVE_DAYS_PER_WEEK,
+      }),
+      delta: activeDaysDelta,
+      // В подсказке — всего дней за всё время: недельная цифра не даёт
+      // представления о том, как давно человек пользуется приложением.
+      period: t("dash.period.weekWithTotal", { total: totalActiveDays }),
     },
   ];
 
@@ -981,9 +1021,13 @@ function StatsGrid({
                 : "cursor-default"
             }`}
           >
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <span className="text-lg">{stat.icon}</span>
-              <DeltaBadge delta={stat.delta} label={t("dash.newBadge")} />
+              <DeltaBadge
+                delta={stat.delta}
+                label={t("dash.newBadge")}
+                period={stat.period}
+              />
             </div>
             <div>
               <p className="mt-2 text-xl font-bold text-white">{stat.value}</p>
@@ -998,44 +1042,29 @@ function StatsGrid({
   );
 }
 
-/** Считает дельту прослушивания: сегодня относительно вчера (из historyMap). */
-function computeTodayDelta(historyMap: Record<string, number>): {
-  percent: number | null;
-  direction: "up" | "down" | "new";
-} {
-  const now = new Date();
-  const key = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-      d.getDate(),
-    ).padStart(2, "0")}`;
-
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-
-  const todayMinutes = historyMap[key(now)] ?? 0;
-  const yesterdayMinutes = historyMap[key(yesterday)] ?? 0;
-
-  if (yesterdayMinutes <= 0) {
-    return { percent: null, direction: "new" };
-  }
-
-  const percent = Math.round(
-    ((todayMinutes - yesterdayMinutes) / yesterdayMinutes) * 100,
-  );
-
-  return { percent, direction: percent >= 0 ? "up" : "down" };
-}
-
 function DeltaBadge({
   delta,
   label,
+  period,
 }: {
-  delta: { percent: number | null; direction: "up" | "down" | "new" };
+  delta: StatDelta;
   label: string;
+  /** За какой период сравнение: «за сегодня» или «за неделю». */
+  period: string;
 }) {
+  /*
+   * Сравнивать не с чем — показываем серый бейдж.
+   *
+   * Это не ошибка: в прошлом периоде активности не было, поэтому процент
+   * посчитать нельзя (делить не на что). Раньше здесь был текст «NEW» —
+   * он не объяснял, что произошло и за какой срок.
+   */
   if (delta.direction === "new" || delta.percent === null) {
     return (
-      <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-purple-100/55">
+      <span
+        className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-purple-100/55"
+        title={period}
+      >
         {label}
       </span>
     );
@@ -1049,6 +1078,8 @@ function DeltaBadge({
           ? "bg-emerald-500/15 text-emerald-300"
           : "bg-neutral-500/20 text-neutral-300"
       }`}
+      // Период в подсказке: «+20%» само по себе не говорит, за какой срок.
+      title={period}
     >
       {isUp ? "↑" : "↓"}
       {delta.percent >= 0 ? "+" : ""}
@@ -1083,6 +1114,9 @@ function AchievementsGrid() {
   const totalTracksPlayed = useProgressionStore((s) => s.totalTracksPlayed);
   const rankTier = useProgressionStore((s) => getRankByXp(s.totalXP).tier);
   const historyMap = useProgressionStore((s) => s.historyMap);
+  const tracksByDay = useProgressionStore((s) => s.tracksByDay);
+  const favoritesByDay = useProgressionStore((s) => s.favoritesByDay);
+  const counters = useProgressionStore((s) => s.counters);
   const favoriteCount = useLibraryStore((s) => s.favoriteTracks.length);
   const playlists = useLibraryStore((s) => s.playlists);
 
@@ -1094,11 +1128,22 @@ function AchievementsGrid() {
       (max: number, playlist) => Math.max(max, playlist.tracks.length),
       0,
     ),
-    // Стрик — число дней с активностью; точное значение приходит из базы,
-    // здесь для прогресс-бара достаточно количества записей в истории.
-    streakDays: Object.keys(historyMap).length,
+    /*
+     * Стрик — число дней с активностью.
+     *
+     * Считаем объединение всех дневных историй: человек мог в какой-то день
+     * только слушать музыку, в другой — только добавлять в избранное. Оба дня
+     * активные, и оба должны попасть в счёт.
+     */
+    streakDays: collectActiveDays(historyMap, tracksByDay, favoritesByDay).length,
     questsClaimed: unlockedCount,
     rankTier,
+    // Метрики, которые считает плеер (см. registerRepeatLoop и соседние).
+    nightPlays: counters.nightPlays,
+    sessionSeconds: counters.maxSessionSeconds,
+    repeatLoops: counters.repeatLoops,
+    shuffleStreak: counters.shuffleStreak,
+    sourceKinds: counters.sources.length,
   };
 
   return (

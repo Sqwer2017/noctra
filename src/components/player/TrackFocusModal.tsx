@@ -85,46 +85,76 @@ export function TrackFocusModal({
             className="flex flex-col items-center gap-6"
             onClick={(e) => e.stopPropagation()}
           >
+            {/*
+              Появление и 3D-наклон — на РАЗНЫХ элементах.
+
+              Раньше и то, и другое было на одной карточке: анимация входа
+              (`animate={{ scale, opacity }}`) и наклон через
+              `style={{ transform: rotateX(...) }}`. Так не работает: когда
+              у motion-элемента есть анимируемые transform-свойства, Framer
+              Motion собирает строку transform сам и перезаписывает ручное
+              значение. Наклон молча терялся — карточка просто появлялась.
+
+              Внешний слой отвечает только за вход (масштаб и прозрачность),
+              внутренний — за поворот за курсором. Они не пересекаются,
+              поэтому оба эффекта видны одновременно.
+            */}
             <motion.div
-              ref={cardRef}
               initial={{ scale: 0.72, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.8, opacity: 0 }}
               transition={{ type: "spring", stiffness: 260, damping: 26 }}
-              onMouseMove={handleMouseMove}
-              onMouseLeave={resetTilt}
-              style={{
-                width: CARD_SIZE,
-                height: CARD_SIZE,
-                transformStyle: "preserve-3d",
-                transform: `rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg)`,
-                transition: "transform 120ms ease-out",
-              }}
-              className="relative overflow-hidden rounded-[32px] border border-white/15 bg-black shadow-2xl shadow-black/60"
+              style={{ width: CARD_SIZE, height: CARD_SIZE }}
             >
-              {track.coverUrl ? (
-                <img
-                  src={track.coverUrl}
-                  alt=""
-                  draggable={false}
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_top,var(--accent-glow),rgba(20,14,32,0.95))] text-6xl font-bold text-white/80">
-                  {track.title?.[0]?.toUpperCase() ?? "♪"}
-                </div>
-              )}
-
-              {/* Голографический блик, следующий за курсором */}
               <div
-                className="pointer-events-none absolute inset-0 mix-blend-overlay"
+                ref={cardRef}
+                onMouseMove={handleMouseMove}
+                onMouseLeave={resetTilt}
                 style={{
-                  background: `radial-gradient(circle at ${tilt.mx}% ${tilt.my}%, rgba(255,255,255,0.55), rgba(255,255,255,0) 45%), linear-gradient(120deg, rgba(255,0,200,0.18), rgba(0,220,255,0.18))`,
+                  width: "100%",
+                  height: "100%",
+                  // perspective нужна на поворачиваемом элементе, иначе
+                  // transform выглядит плоским, без ощущения объёма.
+                  perspective: 1000,
                 }}
-              />
+              >
+                <div
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    transformStyle: "preserve-3d",
+                    transform: `rotateX(${tilt.rx}deg) rotateY(${tilt.ry}deg)`,
+                    // Плавное «догоняние» курсора: без перехода движение
+                    // дёргается на каждом событии мыши.
+                    transition: "transform 120ms ease-out",
+                  }}
+                  className="relative overflow-hidden rounded-[32px] border border-white/15 bg-black shadow-2xl shadow-black/60"
+                >
+                {track.coverUrl ? (
+                  <img
+                    src={track.coverUrl}
+                    alt=""
+                    draggable={false}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_top,var(--accent-glow),rgba(20,14,32,0.95))] text-6xl font-bold text-white/80">
+                    {track.title?.[0]?.toUpperCase() ?? "♪"}
+                  </div>
+                )}
 
-              {/* Тонкая рамка-перелив */}
-              <div className="pointer-events-none absolute inset-0 rounded-[32px] ring-1 ring-inset ring-white/10" />
+                {/* Голографический блик, следующий за курсором */}
+                <div
+                  className="pointer-events-none absolute inset-0 mix-blend-overlay"
+                  style={{
+                    background: `radial-gradient(circle at ${tilt.mx}% ${tilt.my}%, rgba(255,255,255,0.55), rgba(255,255,255,0) 45%), linear-gradient(120deg, rgba(255,0,200,0.18), rgba(0,220,255,0.18))`,
+                  }}
+                />
+
+                {/* Тонкая рамка-перелив */}
+                <div className="pointer-events-none absolute inset-0 rounded-[32px] ring-1 ring-inset ring-white/10" />
+                </div>
+              </div>
             </motion.div>
 
             {/* Детали трека */}

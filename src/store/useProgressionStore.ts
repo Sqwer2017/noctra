@@ -55,6 +55,34 @@ export const QUESTS: {
   { id: "nightMarathon", titleKey: "quest.nightMarathon", target: 10, rewardXP: 8 },
 ];
 
+/** Сколько часов считается «ночью» — для достижения «Полуночный пилигрим». */
+const NIGHT_START_HOUR = 0;
+const NIGHT_END_HOUR = 6;
+
+/**
+ * Накопительные метрики для достижений.
+ *
+ * Все они «рекордные», а не суммирующие: хранится максимум за всё время.
+ * Так их нельзя накрутить перезагрузкой страницы — повторный проход просто
+ * не превысит уже достигнутое значение. Это же спасает от задвоения при
+ * повторной отправке в базу.
+ */
+export type AchievementCounters = {
+  /** Треки, дослушанные ночью (00:00–05:59). */
+  nightPlays: number;
+  /** Самая длинная непрерывная сессия, секунды. */
+  maxSessionSeconds: number;
+  /** Максимум повторов подряд одного трека (режим «повтор одного»). */
+  repeatLoops: number;
+  /** Максимум треков подряд в режиме перемешивания. */
+  shuffleStreak: number;
+  /** Уникальные источники прослушанных треков. */
+  sources: string[];
+};
+
+/** Длительность паузы, после которой сессия считается новой. */
+const SESSION_BREAK_SECONDS = 300;
+
 type DailyState = {
   date: string;
   /** Секунды прослушивания за день (для квеста «Погружение» и XP). */
@@ -99,6 +127,34 @@ type ProgressionState = {
   totalTracksPlayed: number;
   /** Минуты прослушивания по дням: { 'YYYY-MM-DD': minutes }. */
   historyMap: Record<string, number>;
+  /** Полностью прослушанные треки по дням: { 'YYYY-MM-DD': count }. */
+  tracksByDay: Record<string, number>;
+  /** Добавления в избранное по дням: { 'YYYY-MM-DD': count }. */
+  favoritesByDay: Record<string, number>;
+  /**
+   * Секунды текущей непрерывной сессии.
+   *
+   * Растёт на каждом тике, пока играет музыка. Сбрасывается, если пауза
+   * превысила SESSION_BREAK_SECONDS: иначе «сессией» оказалось бы всё время
+   * с открытой вкладкой, и достижение за час непрерывного прослушивания
+   * выдавалось бы просто за долгий день.
+   */
+  currentSessionSeconds: number;
+  /** Когда был последний тик прослушивания (для определения разрыва). */
+  lastTickAt: number;
+  /**
+   * Рекордные счётчики достижений.
+   *
+   * Хранятся как максимумы, поэтому не сбрасываются при перезагрузке
+   * и не задваиваются при повторной записи.
+   */
+  counters: AchievementCounters;
+  /** Текущая серия повторов одного трека (рабочее значение). */
+  repeatRun: number;
+  /** Текущая серия треков в режиме перемешивания (рабочее значение). */
+  shuffleRun: number;
+  /** id трека, который сейчас повторяется (чтобы сбросить серию при смене). */
+  repeatTrackId: string | null;
   /**
    * Треки, за добавление в избранное которых XP уже начислен.
    *
@@ -123,6 +179,23 @@ type ProgressionState = {
    * «Ночной марафон»: переключения и паузы в статистику не попадают.
    */
   registerTrackCompleted: () => void;
+  /**
+   * Регистрирует повтор текущего трека (режим «повтор одного»).
+   *
+   * Считает серию повторов ПОДРЯД: трек повторяется десять раз без
+   * переключений — серия растёт. Смена трека сбрасывает её, иначе счётчик
+   * копился бы за весь день и достижение теряло бы смысл.
+   */
+  registerRepeatLoop: (trackId: string) => void;
+  /**
+   * Регистрирует переход к следующему треку.
+   *
+   * Нужен для серии перемешивания: в режиме `shuffle` считаем подряд идущие
+   * треки, в остальных режимах серия сбрасывается.
+   */
+  registerTrackAdvance: (trackId: string, isShuffle: boolean) => void;
+  /** Запоминает источник трека (для достижения «Двойной резонанс»). */
+  registerTrackSource: (source: string) => void;
   /**
    * Добавление в избранное: квест + XP за уникальный трек.
    *
@@ -248,8 +321,27 @@ async function syncProgressionNow(): Promise<void> {
     await pushListeningStats({
       totalSecondsListened,
       totalTracksPlayed,
-      activeDaysCount: Object.keys(historyMap).length,
+      /*
+       * Число активных дней считаем как объединение всех дневных историй.
+       *
+       * Одного `historyMap` мало: если человек только лайкал треки, не слушая
+       * музыку, день всё равно активный, а в истории прослушивания его нет.
+       * Объединение даёт честное число — оно же используется для недельного
+       * прогресса плитки «Дней активности».
+       */
+      activeDaysCount: countActiveDays(
+        historyMap,
+        state.tracksByDay,
+        state.favoritesByDay,
+      ),
       history: historyMap,
+      tracksByDay: state.tracksByDay,
+      favoritesByDay: state.favoritesByDay,
+      nightPlays: state.counters.nightPlays,
+      maxSessionSeconds: state.counters.maxSessionSeconds,
+      repeatLoops: state.counters.repeatLoops,
+      shuffleStreak: state.counters.shuffleStreak,
+      sources: state.counters.sources,
     });
   } finally {
     isSyncing = false;
@@ -271,23 +363,54 @@ const scheduleCloudSync = throttle(() => {
 }, SYNC_INTERVAL_MS);
 
 /**
- * Объединяет историю прослушивания по дням.
+ * Объединяет дневные истории (минуты, треки, лайки).
  *
- * По каждой дате берём большее значение: минуты только накапливаются, поэтому
- * расхождение означает, что одно из хранилищ отстало. Складывать нельзя —
- * получилось бы задвоение.
+ * По каждой дате берём большее значение: счётчики только накапливаются,
+ * поэтому расхождение означает, что одно из хранилищ отстало. Складывать
+ * нельзя — получилось бы задвоение.
+ *
+ * Функция одна на три истории (`historyMap`, `tracksByDay`, `favoritesByDay`):
+ * структура у них одинаковая, отличается только смысл чисел.
  */
-function mergeHistory(
+function mergeDailyHistory(
   local: Record<string, number>,
   cloud: Record<string, number>,
 ): Record<string, number> {
   const merged: Record<string, number> = { ...cloud };
 
-  for (const [date, minutes] of Object.entries(local)) {
-    merged[date] = Math.max(merged[date] ?? 0, minutes);
+  for (const [date, value] of Object.entries(local)) {
+    merged[date] = Math.max(merged[date] ?? 0, value);
   }
 
   return merged;
+}
+
+/**
+ * Считает число уникальных дней с активностью.
+ *
+ * Объединяет все дневные истории: человек мог в какой-то день только слушать
+ * музыку, в другой — только добавлять в избранное. Каждый такой день активен,
+ * поэтому берём объединение дат, а не одну из историй.
+ *
+ * Возвращает не только число, но и сами даты — они нужны недельному прогрессу
+ * плитки «Дней активности» (сколько из семи дней текущей недели были активны).
+ */
+export function collectActiveDays(...histories: Record<string, number>[]): string[] {
+  const days = new Set<string>();
+
+  for (const history of histories) {
+    for (const [date, value] of Object.entries(history)) {
+      // Нулевые значения не считаем активностью.
+      if (value > 0) days.add(date);
+    }
+  }
+
+  return [...days].sort();
+}
+
+/** Число активных дней (для колонки `active_days_count`). */
+function countActiveDays(...histories: Record<string, number>[]): number {
+  return collectActiveDays(...histories).length;
 }
 
 /** Отправляет состояние одного задания (только прогресс). */
@@ -310,6 +433,20 @@ export const useProgressionStore = create<ProgressionState>()(
       totalSecondsListened: 0,
       totalTracksPlayed: 0,
       historyMap: {},
+      tracksByDay: {},
+      favoritesByDay: {},
+      currentSessionSeconds: 0,
+      lastTickAt: 0,
+      counters: {
+        nightPlays: 0,
+        maxSessionSeconds: 0,
+        repeatLoops: 0,
+        shuffleStreak: 0,
+        sources: [],
+      },
+      repeatRun: 0,
+      shuffleRun: 0,
+      repeatTrackId: null,
       favoriteXpTrackIds: {},
       daily: freshDay(),
 
@@ -342,10 +479,40 @@ export const useProgressionStore = create<ProgressionState>()(
         const prevMinutes = state.historyMap[today] ?? 0;
         const nextMinutes = prevMinutes + seconds / 60;
 
+        /*
+         * Сессия прослушивания.
+         *
+         * Тик приходит раз в секунду, пока играет музыка. Если между тиками
+         * прошло больше SESSION_BREAK_SECONDS, считаем, что человек ушёл
+         * и вернулся, — начинаем новую сессию. Иначе «непрерывной сессией»
+         * оказалось бы всё время с открытой вкладкой.
+         *
+         * Берём разницу по настенным часам, а не считаем тики: вкладка в фоне
+         * может троттлиться браузером, и тики приходят реже реального времени.
+         */
+        const now = Date.now();
+        const gapSeconds =
+          state.lastTickAt > 0 ? (now - state.lastTickAt) / 1000 : 0;
+
+        const isNewSession = gapSeconds > SESSION_BREAK_SECONDS;
+        const nextSessionSeconds = isNewSession
+          ? seconds
+          : state.currentSessionSeconds + seconds;
+
         set({
           totalSecondsListened: state.totalSecondsListened + seconds,
           totalXP: state.totalXP + gainedXp,
           historyMap: { ...state.historyMap, [today]: nextMinutes },
+          currentSessionSeconds: nextSessionSeconds,
+          lastTickAt: now,
+          counters: {
+            ...state.counters,
+            // Рекорд: сессия либо побила предыдущий максимум, либо нет.
+            maxSessionSeconds: Math.max(
+              state.counters.maxSessionSeconds,
+              Math.round(nextSessionSeconds),
+            ),
+          },
           daily: { ...state.daily, listenedSeconds: nextDaySeconds },
         });
 
@@ -363,15 +530,123 @@ export const useProgressionStore = create<ProgressionState>()(
          * увеличивался ещё и при старте трека, из-за чего в статистику попадали
          * переключения, а не прослушивания.
          */
-        set((state) => ({
+        const today = todayKey();
+        const state = get();
+
+        /*
+         * Ночное прослушивание — для достижения «Полуночный пилигрим».
+         *
+         * Час берём локальный: достижение про «слушал ночью» должно совпадать
+         * с тем, что человек видит на своих часах, а не с UTC.
+         */
+        const hour = new Date().getHours();
+        const isNight = hour >= NIGHT_START_HOUR && hour < NIGHT_END_HOUR;
+
+        set({
           totalTracksPlayed: state.totalTracksPlayed + 1,
+          // Дневная история прослушанных треков — для прогресса в профиле.
+          tracksByDay: {
+            ...state.tracksByDay,
+            [today]: (state.tracksByDay[today] ?? 0) + 1,
+          },
+          counters: {
+            ...state.counters,
+            nightPlays: isNight
+              ? state.counters.nightPlays + 1
+              : state.counters.nightPlays,
+          },
           daily: {
             ...state.daily,
             completedTracks: state.daily.completedTracks + 1,
           },
-        }));
+        });
 
         void syncQuestProgress("nightMarathon");
+        scheduleCloudSync();
+      },
+
+      registerRepeatLoop: (trackId) => {
+        const state = get();
+
+        /*
+         * Серия повторов одного трека — для достижения «Одержимость».
+         *
+         * Если повторяется тот же трек, серия растёт. Если сменился —
+         * начинаем заново с единицы: важно именно количество повторов ПОДРЯД,
+         * иначе счётчик копился бы за весь день и достижение обесценилось бы.
+         */
+        const isSameTrack = state.repeatTrackId === trackId;
+        const nextRun = isSameTrack ? state.repeatRun + 1 : 1;
+
+        set({
+          repeatRun: nextRun,
+          repeatTrackId: trackId,
+          counters: {
+            ...state.counters,
+            repeatLoops: Math.max(state.counters.repeatLoops, nextRun),
+          },
+        });
+
+        scheduleCloudSync();
+      },
+
+      registerTrackAdvance: (trackId, isShuffle) => {
+        const state = get();
+
+        /*
+         * Серия перемешивания — для достижения «Слепая судьба».
+         *
+         * ПОДРЯД идущие треки в режиме `shuffle`. При выходе из режима серия
+         * обрывается — достижение про то, что человек долго слушал именно
+         * вперемешку, а не про общее число переключений.
+         *
+         * ВАЖНО: текущая серия и рекорд — разные величины. Рекорд лежит
+         * в `counters.shuffleStreak` и только растёт, а текущая серия —
+         * в `shuffleRun`. Если сбрасывать общий счётчик, при выходе из режима
+         * обнулялся бы и рекорд, и достижение становилось бы недостижимым.
+         */
+        if (!isShuffle) {
+          if (state.shuffleRun === 0) return;
+
+          // Обрываем текущую серию, рекорд не трогаем.
+          set({
+            shuffleRun: 0,
+            repeatRun: 0,
+            repeatTrackId: null,
+          });
+          return;
+        }
+
+        // Серия растёт, только когда трек действительно сменился.
+        const isNewTrack = state.repeatTrackId !== trackId;
+        const nextRun = isNewTrack ? state.shuffleRun + 1 : state.shuffleRun;
+
+        set({
+          shuffleRun: nextRun,
+          counters: {
+            ...state.counters,
+            // Рекорд обновляем отдельно — он не сбрасывается никогда.
+            shuffleStreak: Math.max(state.counters.shuffleStreak, nextRun),
+          },
+          // Переход к другому треку обрывает серию его повторов.
+          repeatRun: isNewTrack ? 0 : state.repeatRun,
+          repeatTrackId: trackId,
+        });
+
+        scheduleCloudSync();
+      },
+
+      registerTrackSource: (source) => {
+        const state = get();
+        if (!source) return;
+        if (state.counters.sources.includes(source)) return;
+
+        const sources = [...state.counters.sources, source];
+
+        set({
+          counters: { ...state.counters, sources },
+        });
+
         scheduleCloudSync();
       },
 
@@ -396,12 +671,18 @@ export const useProgressionStore = create<ProgressionState>()(
         const alreadyRewarded = Boolean(get().favoriteXpTrackIds[trackId]);
         const state = get();
         const canGainXp = awardedXp > 0 && !alreadyRewarded;
+        const today = todayKey();
 
         set({
           totalXP: state.totalXP + (canGainXp ? awardedXp : 0),
           favoriteXpTrackIds: canGainXp
-            ? { ...state.favoriteXpTrackIds, [trackId]: todayKey() }
+            ? { ...state.favoriteXpTrackIds, [trackId]: today }
             : state.favoriteXpTrackIds,
+          // Дневная история лайков — для прогресса плитки «Любимых треков».
+          favoritesByDay: {
+            ...state.favoritesByDay,
+            [today]: (state.favoritesByDay[today] ?? 0) + 1,
+          },
           daily: {
             ...state.daily,
             favoritesAdded: state.daily.favoritesAdded + 1,
@@ -623,8 +904,46 @@ export const useProgressionStore = create<ProgressionState>()(
             stats.totalTracksPlayed,
           );
 
-          // Историю по дням объединяем: по каждой дате берём большее значение.
-          patch.historyMap = mergeHistory(local.historyMap, stats.history);
+          // Дневные истории объединяем: по каждой дате берём большее значение.
+          patch.historyMap = mergeDailyHistory(local.historyMap, stats.history);
+          patch.tracksByDay = mergeDailyHistory(
+            local.tracksByDay,
+            stats.tracksByDay,
+          );
+          patch.favoritesByDay = mergeDailyHistory(
+            local.favoritesByDay,
+            stats.favoritesByDay,
+          );
+
+          /*
+           * Рекордные счётчики — тоже по максимуму.
+           *
+           * Они только растут, поэтому расхождение означает недосинхронизацию,
+           * а не реальное уменьшение. Складывать нельзя: это привело бы
+           * к задвоению при каждой гидратации.
+           */
+          patch.counters = {
+            nightPlays: Math.max(
+              local.counters.nightPlays,
+              stats.nightPlays,
+            ),
+            maxSessionSeconds: Math.max(
+              local.counters.maxSessionSeconds,
+              stats.maxSessionSeconds,
+            ),
+            repeatLoops: Math.max(
+              local.counters.repeatLoops,
+              stats.repeatLoops,
+            ),
+            shuffleStreak: Math.max(
+              local.counters.shuffleStreak,
+              stats.shuffleStreak,
+            ),
+            // Список источников — объединение множеств, а не максимум.
+            sources: [
+              ...new Set([...local.counters.sources, ...stats.sources]),
+            ],
+          };
         }
 
         /*
@@ -714,6 +1033,20 @@ export const useProgressionStore = create<ProgressionState>()(
           totalSecondsListened: 0,
           totalTracksPlayed: 0,
           historyMap: {},
+          tracksByDay: {},
+          favoritesByDay: {},
+          currentSessionSeconds: 0,
+          lastTickAt: 0,
+          counters: {
+            nightPlays: 0,
+            maxSessionSeconds: 0,
+            repeatLoops: 0,
+            shuffleStreak: 0,
+            sources: [],
+          },
+          repeatRun: 0,
+          shuffleRun: 0,
+          repeatTrackId: null,
           favoriteXpTrackIds: {},
           daily: freshDay(),
         }),
@@ -725,6 +1058,26 @@ export const useProgressionStore = create<ProgressionState>()(
         totalSecondsListened: state.totalSecondsListened,
         totalTracksPlayed: state.totalTracksPlayed,
         historyMap: state.historyMap,
+        tracksByDay: state.tracksByDay,
+        favoritesByDay: state.favoritesByDay,
+        /*
+         * Рекордные счётчики переживают перезагрузку.
+         *
+         * Без этого достижения «за час непрерывного прослушивания» или
+         * «десять повторов подряд» обнулялись бы при каждом F5, и получить
+         * их было бы почти невозможно. Плюс они нужны для прогресс-баров.
+         *
+         * Саму сессию (`currentSessionSeconds`) сохраняем тоже — иначе
+         * обновление страницы посреди долгого прослушивания разрывало бы
+         * серию. `lastTickAt` хранится вместе с ней и защищает от накрутки:
+         * после долгой паузы сессия начнётся заново.
+         */
+        currentSessionSeconds: state.currentSessionSeconds,
+        lastTickAt: state.lastTickAt,
+        counters: state.counters,
+        repeatRun: state.repeatRun,
+        shuffleRun: state.shuffleRun,
+        repeatTrackId: state.repeatTrackId,
         // Список оплаченных лайков обязан переживать перезагрузку: иначе
         // после F5 защита от абуза сбрасывалась бы вместе с ним.
         favoriteXpTrackIds: state.favoriteXpTrackIds,

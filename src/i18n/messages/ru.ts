@@ -171,6 +171,11 @@ const ru = {
   "dash.tracksPlayed": "Треков прослушано",
   "dash.likedTracks": "Любимых треков",
   "dash.activeDays": "Дней активности",
+  "dash.activeDaysValue": "{current} / {total}",
+  "dash.period.today": "Изменение за сегодня к вчерашнему дню",
+  "dash.period.week": "Изменение за эту неделю к прошлой",
+  "dash.period.weekWithTotal":
+    "Изменение за эту неделю к прошлой. Всего активных дней: {total}",
   "dash.level": "Уровень",
   "dash.xp": "опыт",
   "dash.listeningHeatmap": "Время прослушивания",

@@ -11,6 +11,7 @@ import {
   Check,
   Heart,
   ListMusic,
+  Maximize2,
   ListPlus,
   Pause,
   Play,
@@ -110,6 +111,9 @@ export function BottomPlayer({
   const poolSize = playQueue.length + trackQueue.length;
 
   const [isFocusOpen, setIsFocusOpen] = useState(false);
+
+  /** Курсор над обложкой: затемнение и подсказка «раскрыть». */
+  const [isCoverHovered, setIsCoverHovered] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -234,9 +238,20 @@ export function BottomPlayer({
   const nextTrackRef = useRef(onNextTrack);
   const setIsPlayingRef = useRef(setIsPlayingInStore);
 
+  /*
+   * Режим воспроизведения читаем через ref, а не напрямую.
+   *
+   * Эффект смены трека зависит только от самого трека: если добавить в
+   * зависимости `playMode`, переключение режима перезапускало бы эффект,
+   * а вместе с ним `load()` — трек откатывался бы на начало. При этом режим
+   * нужен внутри, чтобы понять, растёт ли серия перемешивания.
+   */
+  const playModeRef = useRef(playMode);
+
   useEffect(() => {
     nextTrackRef.current = onNextTrack;
     setIsPlayingRef.current = setIsPlayingInStore;
+    playModeRef.current = playMode;
   });
 
   useEffect(() => {
@@ -251,6 +266,20 @@ export function BottomPlayer({
 
     shouldAutoPlayRef.current = true;
     setPlaybackError(false);
+
+    /*
+     * Метрики достижений, привязанные к смене трека.
+     *
+     * Вызываем из того же эффекта, что и загрузку: он срабатывает ровно
+     * один раз на трек (зависит только от id), поэтому счётчики не задвоятся
+     * от лишних рендеров.
+     */
+    const progression = useProgressionStore.getState();
+    progression.registerTrackSource(currentTrack.source);
+    progression.registerTrackAdvance(
+      currentTrack.id,
+      playModeRef.current === "shuffle",
+    );
 
     const element = audioRef.current;
 
@@ -401,6 +430,20 @@ export function BottomPlayer({
     useProgressionStore.getState().registerTrackCompleted();
 
     if (playMode === "repeat-one") {
+      /*
+       * Считаем повторы ПОДРЯД для достижения «Одержимость».
+       *
+       * Именно здесь, а не в сторе плеера: событие окончания трека приходит
+       * только отсюда, и только тут известно, что повтор действительно
+       * состоялся. `playNext` для repeat-one не вызывается — зацикливание
+       * делает сам плеер.
+       */
+      if (currentTrack) {
+        useProgressionStore
+          .getState()
+          .registerRepeatLoop(currentTrack.id);
+      }
+
       // Зацикливаем текущий трек. `.catch` обязателен: без него отклонённый
       // `play()` становится необработанным отказом и воспроизведение молча
       // умирает на 0:00.
@@ -814,24 +857,51 @@ export function BottomPlayer({
         onClick={() => {
           if (currentTrack) setIsFocusOpen(true);
         }}
+        onPointerEnter={() => setIsCoverHovered(true)}
+        onPointerLeave={() => setIsCoverHovered(false)}
         disabled={!currentTrack}
         title={currentTrack ? t("player.focusMode") : undefined}
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.96 }}
+        whileHover={{ scale: 1.06, y: -2 }}
+        whileTap={{ scale: 0.95 }}
         transition={{ type: "spring", stiffness: 420, damping: 26 }}
-        className="h-14 w-14 shrink-0 overflow-hidden rounded-2xl bg-gradient-to-br from-purple-500/40 to-black shadow-lg shadow-purple-950/30 transition hover:ring-2 hover:ring-purple-300/40 disabled:cursor-default"
+        className="group relative h-14 w-14 shrink-0 cursor-pointer overflow-hidden rounded-2xl bg-gradient-to-br from-purple-500/40 to-black shadow-lg shadow-purple-950/30 transition-shadow hover:shadow-[0_0_24px_-4px_var(--accent-glow)] hover:ring-2 hover:ring-purple-300/40 disabled:cursor-default"
       >
         {currentTrack?.coverUrl ? (
           <img
             src={currentTrack.coverUrl}
             alt=""
-            className="h-full w-full object-cover"
+            className={`h-full w-full object-cover transition duration-300 ${
+              isCoverHovered ? "scale-110 brightness-[0.45]" : ""
+            }`}
           />
         ) : (
           <span className="flex h-full w-full items-center justify-center text-purple-100/50">
             <ListMusic size={18} />
           </span>
         )}
+
+        {/*
+          Оверлей с иконкой «раскрыть».
+
+          Обложка по клику открывает полноэкранный режим, но раньше об этом
+          ничего не подсказывало: при наведении менялся только размер. Теперь
+          картинка затемняется и по центру проявляется иконка — как в списках
+          треков, где клик по обложке тоже что-то запускает.
+
+          Управляется состоянием, а не CSS-hover: у кнопки уже есть анимация
+          масштаба от Framer Motion, и вложенный `group-hover` конфликтовал бы
+          с ней по времени срабатывания.
+        */}
+        <span
+          aria-hidden="true"
+          className={`pointer-events-none absolute inset-0 flex items-center justify-center transition-all duration-200 ${
+            isCoverHovered ? "scale-100 opacity-100" : "scale-75 opacity-0"
+          }`}
+        >
+          <span className="inline-flex aspect-square items-center justify-center rounded-full bg-black/60 p-1.5 leading-none ring-1 ring-white/20">
+            <Maximize2 size={13} className="m-0 block text-white" />
+          </span>
+        </span>
       </motion.button>
 
       <div className="w-40 min-w-0">

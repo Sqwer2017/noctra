@@ -163,6 +163,11 @@ const en = {
   "dash.tracksPlayed": "Tracks played",
   "dash.likedTracks": "Liked tracks",
   "dash.activeDays": "Active days",
+  "dash.activeDaysValue": "{current} / {total}",
+  "dash.period.today": "Change today vs yesterday",
+  "dash.period.week": "Change this week vs last week",
+  "dash.period.weekWithTotal":
+    "Change this week vs last week. Total active days: {total}",
   "dash.level": "Level",
   "dash.xp": "XP",
   "dash.listeningHeatmap": "Listening time",

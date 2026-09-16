@@ -16,7 +16,32 @@ export type ListeningStats = {
   totalTracksPlayed: number;
   activeDaysCount: number;
   history: Record<string, number>;
+  /** Полностью прослушанные треки по дням. */
+  tracksByDay: Record<string, number>;
+  /** Добавления в избранное по дням. */
+  favoritesByDay: Record<string, number>;
+  /** Рекордные счётчики достижений. */
+  nightPlays: number;
+  maxSessionSeconds: number;
+  repeatLoops: number;
+  shuffleStreak: number;
+  sources: string[];
 };
+
+/** Список колонок статистики — один на чтение и запись. */
+const STATS_COLUMNS = [
+  "total_seconds_listened",
+  "total_tracks_played",
+  "active_days_count",
+  "listening_history",
+  "daily_tracks",
+  "daily_favorites",
+  "night_plays",
+  "max_session_seconds",
+  "repeat_loops",
+  "shuffle_streak",
+  "source_list",
+].join(", ");
 
 export async function fetchListeningStats(
   userId: string,
@@ -25,13 +50,20 @@ export async function fetchListeningStats(
 
   const { data, error } = await supabase
     .from("user_stats")
-    .select("total_seconds_listened, total_tracks_played, active_days_count, listening_history")
+    .select(STATS_COLUMNS)
     .eq("user_id", userId)
     .maybeSingle<{
       total_seconds_listened: number;
       total_tracks_played: number;
       active_days_count: number;
       listening_history: Record<string, number> | null;
+      daily_tracks: Record<string, number> | null;
+      daily_favorites: Record<string, number> | null;
+      night_plays: number | null;
+      max_session_seconds: number | null;
+      repeat_loops: number | null;
+      shuffle_streak: number | null;
+      source_list: string[] | null;
     }>();
 
   if (error) {
@@ -48,6 +80,13 @@ export async function fetchListeningStats(
     // Минуты в UI целые (как в примере схемы {"2026-09-15": 35}), но накопление
     // идёт дробно — округляем только на запись, чтобы не терять точность.
     history: data.listening_history ?? {},
+    tracksByDay: data.daily_tracks ?? {},
+    favoritesByDay: data.daily_favorites ?? {},
+    nightPlays: Number(data.night_plays ?? 0),
+    maxSessionSeconds: Number(data.max_session_seconds ?? 0),
+    repeatLoops: Number(data.repeat_loops ?? 0),
+    shuffleStreak: Number(data.shuffle_streak ?? 0),
+    sources: Array.isArray(data.source_list) ? data.source_list : [],
   };
 }
 
@@ -60,16 +99,30 @@ export async function fetchListeningStats(
  * безвозвратно, хотя для остальных данных очередь работала.
  */
 export async function pushListeningStats(stats: ListeningStats): Promise<void> {
-  const roundedHistory: Record<string, number> = {};
-  for (const [date, minutes] of Object.entries(stats.history)) {
-    roundedHistory[date] = Math.round(minutes);
-  }
+  /** Минуты прослушивания округляем: дробные значения в базе не нужны. */
+  const roundMinutes = (source: Record<string, number>) => {
+    const result: Record<string, number> = {};
+    for (const [date, value] of Object.entries(source)) {
+      result[date] = Math.round(value);
+    }
+    return result;
+  };
 
   const payload = {
     total_seconds_listened: Math.round(stats.totalSecondsListened),
     total_tracks_played: stats.totalTracksPlayed,
     active_days_count: stats.activeDaysCount,
-    listening_history: roundedHistory,
+    listening_history: roundMinutes(stats.history),
+    // Счётчики целые по определению, но защищаемся от дробей в истории.
+    daily_tracks: roundMinutes(stats.tracksByDay),
+    daily_favorites: roundMinutes(stats.favoritesByDay),
+    night_plays: stats.nightPlays,
+    max_session_seconds: stats.maxSessionSeconds,
+    repeat_loops: stats.repeatLoops,
+    shuffle_streak: stats.shuffleStreak,
+    source_list: stats.sources,
+    // Производное от списка: SQL-триггер сравнивает число с порогом.
+    source_kinds: stats.sources.length,
   };
 
   await syncWrite(

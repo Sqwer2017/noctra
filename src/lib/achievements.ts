@@ -243,6 +243,23 @@ export type AchievementMetrics = {
   streakDays: number;
   questsClaimed: number;
   rankTier: number;
+  /*
+   * Метрики, которые считает плеер и хранит стор прогрессии.
+   *
+   * Они появились позже остальных: изначально эти поля никто не заполнял,
+   * из-за чего пять достижений не засчитывались, а их прогресс-бары всегда
+   * показывали ноль.
+   */
+  /** Треки, дослушанные ночью (00:00–05:59). */
+  nightPlays: number;
+  /** Самая длинная непрерывная сессия, секунды. */
+  sessionSeconds: number;
+  /** Максимум повторов подряд одного трека. */
+  repeatLoops: number;
+  /** Максимум треков подряд в режиме перемешивания. */
+  shuffleStreak: number;
+  /** Сколько разных источников треков прослушано. */
+  sourceKinds: number;
 };
 
 /** Возвращает текущее значение метрики для конкретного достижения. */
@@ -265,9 +282,26 @@ export function getMetricValue(
       return metrics.questsClaimed;
     case "max_rank":
       return metrics.rankTier;
+    case "night_plays":
+      return metrics.nightPlays;
+    case "session_seconds":
+      return metrics.sessionSeconds;
+    case "repeat_loops":
+      return metrics.repeatLoops;
+    case "shuffle_streak":
+      return metrics.shuffleStreak;
+    case "dual_source":
+      return metrics.sourceKinds;
     default:
-      // Событийные достижения прогресса не показывают.
-      return 0;
+      /*
+       * Событийные достижения прогресса не показывают.
+       *
+       * Сюда попадают `album_complete` и `profile_complete`: у них
+       * `target === null`, и полоса всё равно не рисуется (см.
+       * `getAchievementProgress`). Возвращаем 1, чтобы условие «уже
+       * выполнено» читалось как истинное, а не как «ноль из нуля».
+       */
+      return achievement.target === null ? 1 : 0;
   }
 }
 
