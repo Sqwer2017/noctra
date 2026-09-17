@@ -1,0 +1,56 @@
+-- ============================================================================
+-- 012_drop_old_add_favorite.sql
+--
+-- Убирает дубликат функции add_favorite, из-за которого ломалось избранное.
+--
+-- ПРОБЛЕМА
+-- -------
+-- Добавление в избранное не работало вообще: ни для YouTube, ни для Telegram,
+-- ни для Audius. В консоли браузера:
+--
+--   PGRST203: Could not choose the best candidate function between:
+--   public.add_favorite(p_track_id => text, ..., p_daily_cap => integer, ...)
+--   public.add_favorite(p_track_id => text, ..., p_video_id => text, ...)
+--
+-- ПРИЧИНА
+-- -------
+-- Миграция 011 добавила функции параметр `p_video_id`, чтобы сохранять
+-- идентификатор видео YouTube. Но `CREATE OR REPLACE FUNCTION` заменяет
+-- функцию только с ТЕМ ЖЕ набором аргументов: набор изменился, поэтому
+-- старая версия осталась в базе, и рядом появилась новая.
+--
+-- PostgREST вызывает функцию по имени и не может выбрать между двумя
+-- кандидатами — запрос отклоняется ещё до выполнения. Клиент видит ошибку
+-- и не сохраняет лайк ни локально в базу, ни в облако.
+--
+-- РЕШЕНИЕ
+-- -------
+-- Удаляем старую версию. Новая (с `p_video_id`) остаётся и работает.
+--
+-- Этот файл нужен отдельно, потому что 011 уже могла быть применена до того,
+-- как в неё добавили удаление. Повторный запуск безопасен: DROP IF EXISTS.
+-- ============================================================================
+
+DROP FUNCTION IF EXISTS public.add_favorite(
+  TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, INTEGER, INTEGER
+);
+
+-- ── Проверка ─────────────────────────────────────────────────────────────
+--
+-- Должна остаться РОВНО ОДНА функция add_favorite:
+--
+--   SELECT p.proname,
+--          pg_get_function_arguments(p.oid) AS args
+--     FROM pg_proc p
+--     JOIN pg_namespace n ON n.oid = p.pronamespace
+--    WHERE n.nspname = 'public'
+--      AND p.proname = 'add_favorite';
+--
+-- Ожидается одна строка, в аргументах которой есть p_video_id.
+--
+-- Убедиться, что вызов больше не падает с PGRST203:
+--
+--   SELECT public.add_favorite('probe-track', 'Test', NULL, NULL, NULL, NULL, 'YouTube', 'probeVideoId');
+--
+-- Ожидается ответ вида {"granted": ..., "reason": ...} — без ошибки выбора
+-- функции. Если трек «probe-track» уже добавлялся, вернётся already_rewarded.

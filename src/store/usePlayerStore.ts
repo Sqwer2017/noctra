@@ -333,10 +333,29 @@ export const usePlayerStore = create<PlayerState>()(
     }),
     {
       name: "noctra.player",
+      /*
+       * Очередь и текущий трек переживают перезагрузку.
+       *
+       * Раньше сохранялись только режим, громкость и mute. Из-за этого после
+       * F5 плеер оказывался пустым: `playQueue` обнулялся, `currentTrack`
+       * пропадал, и кнопки переключения выключались — переключать было нечего.
+       * Снаружи это выглядело как «переключение треков не работает» и
+       * «треки не сохраняются», хотя на самом деле терялось состояние плеера.
+       *
+       * `isPlaying` намеренно НЕ сохраняем: после перезагрузки браузер всё
+       * равно не даст запустить звук без действия пользователя (политика
+       * автовоспроизведения). Поэтому трек восстанавливается на паузе —
+       * человек видит, что слушал, и продолжает одним нажатием.
+       */
       partialize: (state) => ({
         playMode: state.playMode,
         volume: state.volume,
         isMuted: state.isMuted,
+        playQueue: state.playQueue,
+        trackQueue: state.trackQueue,
+        currentTrack: state.currentTrack,
+        currentTrackIndex: state.currentTrackIndex,
+        shuffleHistory: state.shuffleHistory,
       }),
     },
   ),

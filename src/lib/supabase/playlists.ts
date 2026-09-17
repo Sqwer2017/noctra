@@ -17,7 +17,7 @@ export async function fetchPlaylists(userId: string): Promise<Playlist[]> {
   const { data, error } = await supabase
     .from("playlists")
     .select(
-      "id, title, description, cover_url, is_public, created_at, playlist_tracks(track_id, title, artist, duration, cover_url, stream_url, source, order_index)",
+      "id, title, description, cover_url, is_public, created_at, playlist_tracks(track_id, title, artist, duration, cover_url, stream_url, source, video_id, order_index)",
     )
     .eq("user_id", userId)
     .order("created_at", { ascending: false });

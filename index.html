@@ -11,6 +11,17 @@
       кнопка входа автоматически уходит на OAuth-редирект (см. src/services/auth.ts).
     -->
     <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+    <!--
+      Предварительное соединение с YouTube.
+
+      Скрипт IFrame API подключается по требованию — когда пользователь
+      впервые включает YouTube-трек (см. src/components/player/YouTubeBridge.ts).
+      Здесь только прогреваем соединение, чтобы плеер поднялся быстрее:
+      сам скрипт не грузится, пока он не нужен, и не тормозит загрузку.
+    -->
+    <link rel="preconnect" href="https://www.youtube.com" />
+    <link rel="preconnect" href="https://i.ytimg.com" />
   </head>
   <body>
     <div id="root"></div>

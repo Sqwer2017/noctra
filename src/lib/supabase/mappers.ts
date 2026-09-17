@@ -62,6 +62,13 @@ export type TrackRow = {
   cover_url: string | null;
   stream_url: string | null;
   source: string;
+  /**
+   * Идентификатор видео YouTube.
+   *
+   * Без него трек нельзя воспроизвести после перезагрузки: у YouTube нет
+   * `stream_url`, и способ воспроизведения определяется именно по этому полю.
+   */
+  video_id: string | null;
 };
 
 type TrackRowWithMeta = TrackRow & {
@@ -80,6 +87,7 @@ export function trackToRow(track: PlaylistTrack): TrackRow {
     cover_url: track.coverUrl ?? null,
     stream_url: track.streamUrl ?? null,
     source: track.source,
+    video_id: track.videoId ?? null,
   };
 }
 
@@ -93,7 +101,28 @@ export function rowToTrack(row: TrackRowWithMeta): PlaylistTrack {
     coverUrl: row.cover_url ?? null,
     streamUrl: row.stream_url ?? undefined,
     source: (row.source as PlaylistTrack["source"]) ?? "Telegram",
+    /*
+     * Восстанавливаем идентификатор видео.
+     *
+     * Если колонка пуста, но источник YouTube — достаём id из клиентского
+     * идентификатора трека (он имеет вид `youtube_<videoId>`). Так треки,
+     * сохранённые до появления колонки, снова станут воспроизводимыми
+     * без ручной правки базы.
+     */
+    videoId: row.video_id ?? extractVideoId(row.track_id, row.source),
   };
+}
+
+/** Достаёт идентификатор видео из клиентского id трека. */
+function extractVideoId(
+  trackId: string,
+  source: string | null,
+): string | undefined {
+  if (source !== "YouTube") return undefined;
+  if (!trackId.startsWith("youtube_")) return undefined;
+
+  const videoId = trackId.slice("youtube_".length);
+  return videoId || undefined;
 }
 
 // ── playlists ─────────────────────────────────────────────────────────

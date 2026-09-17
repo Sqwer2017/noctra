@@ -16,7 +16,7 @@ export async function fetchFavorites(userId: string): Promise<PlaylistTrack[]> {
 
   const { data, error } = await supabase
     .from("favorites")
-    .select("track_id, title, artist, duration, cover_url, stream_url, source, added_at")
+    .select("track_id, title, artist, duration, cover_url, stream_url, source, video_id, added_at")
     .eq("user_id", userId)
     .order("added_at", { ascending: false });
 
@@ -52,6 +52,14 @@ export async function addFavorite(track: PlaylistTrack): Promise<number> {
     p_cover_url: track.coverUrl,
     p_stream_url: track.streamUrl,
     p_source: track.source,
+    /*
+     * Идентификатор видео.
+     *
+     * Для YouTube он обязателен: прямого потока у источника нет, и после
+     * перезагрузки трек воспроизводится только по этому значению. Без него
+     * лайк сохранялся, но трек становился неиграбельным.
+     */
+    p_video_id: track.videoId ?? null,
   });
 
   if (error) {

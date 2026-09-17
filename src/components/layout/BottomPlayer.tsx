@@ -27,12 +27,27 @@ import {
 } from "lucide-react";
 
 import type { Playlist, PlaylistTrack } from "../../types/playlist";
+import { isYouTubeTrack } from "../../types/playlist";
 import { useT } from "../../i18n/useT";
 import { usePlayerStore } from "../../store/usePlayerStore";
 import { useProgressionStore } from "../../store/useProgressionStore";
 import { TrackFocusModal } from "../player/TrackFocusModal";
 import { motion } from "motion/react";
 import { attachAnalyser, resumeAnalyser } from "../../audio/analyser";
+import {
+  YT_STATE,
+  initYouTubePlayer,
+  isYouTubeReady,
+  setYouTubeCallbacks,
+  ytGetCurrentTime,
+  ytGetDuration,
+  ytGetState,
+  ytLoadTrack,
+  ytPause,
+  ytPlay,
+  ytSeek,
+  ytSetVolume,
+} from "../player/YouTubeBridge";
 
 type PlayerMenuState = "closed" | "open" | "closing";
 
@@ -116,6 +131,18 @@ export function BottomPlayer({
   const [isCoverHovered, setIsCoverHovered] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  /*
+   * Ссылки на выпадающие окна — для закрытия по клику вне них.
+   *
+   * Без этого окно оставалось открытым, пока пользователь не нажмёт крестик
+   * или ту же кнопку. Клик в любом другом месте не закрывал его, хотя это
+   * привычное поведение для поп-апов.
+   */
+  const playlistMenuRef = useRef<HTMLDivElement | null>(null);
+  const queueMenuRef = useRef<HTMLDivElement | null>(null);
+  const playlistButtonRef = useRef<HTMLButtonElement | null>(null);
+  const queueButtonRef = useRef<HTMLButtonElement | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
   const shouldAutoPlayRef = useRef(false);
@@ -126,7 +153,26 @@ export function BottomPlayer({
   /** Трек не удалось загрузить — показываем это в интерфейсе. */
   const [playbackError, setPlaybackError] = useState(false);
 
-  const hasAudioSource = Boolean(currentTrack?.streamUrl);
+  /**
+   * Играет ли YouTube-трек.
+   *
+   * Определяется по источнику: такие треки не проходят через `<audio>`,
+   * потому что прямые потоки YouTube недоступны. Управление идёт через
+   * встроенный IFrame-плеер.
+   */
+  const isYouTube = isYouTubeTrack(currentTrack);
+
+  /**
+   * Может ли текущий трек вообще воспроизводиться.
+   *
+   * У источников разные условия: обычным трекам нужен `streamUrl`, а
+   * YouTube-трекам — `videoId` (прямых потоков у YouTube нет, играет
+   * встроенный плеер). От этого флага зависят доступность кнопок,
+   * ползунка времени и запуск воспроизведения.
+   */
+  const canPlay = isYouTube
+    ? Boolean(currentTrack?.videoId)
+    : Boolean(currentTrack?.streamUrl);
 
   const effectiveVolume = isMuted ? 0 : volume;
   const volumeProgress = Math.round(effectiveVolume * 100);
@@ -150,8 +196,17 @@ export function BottomPlayer({
     audioRef.current.volume = effectiveVolume;
   }, [effectiveVolume]);
 
-  // Регистрируем мост управления реальным <audio> в сторе — чтобы плеер
-  // можно было контролировать из «Сейчас играет» в дашборде профиля.
+  /*
+   * Мост управления плеером для стора.
+   *
+   * Команды приходят снаружи: из «Сейчас играет» в дашборде, с горячих
+   * клавиш, от системных медиа-кнопок. Внутри они разводятся по источнику:
+   * YouTube управляется через встроенный плеер, остальные — через `<audio>`.
+   *
+   * `isYouTubeRef` нужен потому, что эффект регистрируется один раз, а
+   * источник трека меняется со временем. Брать его из замыкания нельзя —
+   * мост запомнил бы значение на момент регистрации.
+   */
   useEffect(() => {
     registerAudioControls({
       play: () => {
@@ -160,16 +215,27 @@ export function BottomPlayer({
       },
       pause: () => {
         shouldAutoPlayRef.current = false;
-        audioRef.current?.pause();
+
+        if (isYouTubeRef.current) ytPause();
+        else audioRef.current?.pause();
+
         setIsPlayingInStore(false);
       },
       seek: (seconds) => {
-        if (!audioRef.current) return;
-        audioRef.current.currentTime = seconds;
+        if (isYouTubeRef.current) {
+          ytSeek(seconds);
+        } else if (audioRef.current) {
+          audioRef.current.currentTime = seconds;
+        }
+
         setCurrentTime(seconds);
+        setStoreCurrentTime(seconds);
       },
       setVolume: (value) => {
+        // Громкость держим в синхроне у обоих плееров: иначе при переключении
+        // источника она скакнёт на прежнее значение.
         if (audioRef.current) audioRef.current.volume = value;
+        ytSetVolume(value);
       },
     });
 
@@ -206,6 +272,91 @@ export function BottomPlayer({
    * до конца (`onEnded` в handleTrackEnded). Текущий трек на паузе или
    * переключённый вручную в статистику не попадает.
    */
+
+  /*
+   * Актуальный признак «играет YouTube».
+   *
+   * Мост управления регистрируется один раз, поэтому значение источника
+   * берётся через ref: иначе замыкание запомнило бы первый трек и все
+   * последующие команды уходили бы не тому плееру.
+   */
+  const isYouTubeRef = useRef(isYouTube);
+
+  useEffect(() => {
+    isYouTubeRef.current = isYouTube;
+  }, [isYouTube]);
+
+  /*
+   * События встроенного YouTube-плеера.
+   *
+   * Плеер живёт вне React, поэтому его состояние нужно переводить в стор
+   * вручную. Обработчики читают актуальные значения через ref-ы — сам эффект
+   * регистрируется однократно и не должен пересоздаваться.
+   */
+  useEffect(() => {
+    setYouTubeCallbacks({
+      onReady: () => {
+        // Плеер поднялся: если YouTube-трек уже выбран, загружаем его.
+        const track = currentTrackRef.current;
+        if (isYouTubeTrack(track) && track?.videoId) {
+          void ytLoadTrack(track.videoId, shouldAutoPlayRef.current);
+        }
+      },
+      onPlaying: () => {
+        setIsPlayingRef.current(true);
+        setPlaybackError(false);
+        recoveryAttemptsRef.current = 0;
+      },
+      onPaused: () => {
+        setIsPlayingRef.current(false);
+      },
+      onEnded: () => {
+        // Обработка окончания общая для обоих источников.
+        handleTrackEndedRef.current();
+      },
+      onError: () => {
+        /*
+         * Видео недоступно: удалено, закрыто или запрещено к встраиванию.
+         * Восстановить это нельзя — сразу переходим к следующему треку,
+         * иначе плеер встанет навсегда.
+         */
+        setPlaybackError(true);
+        setIsPlayingRef.current(false);
+        nextTrackRef.current();
+      },
+    });
+
+    return () => setYouTubeCallbacks(null);
+  }, []);
+
+  /*
+   * Опрос позиции YouTube-трека.
+   *
+   * У `<audio>` есть событие `timeupdate`, которое само двигает ползунок.
+   * У встроенного плеера такого события нет — позицию приходится спрашивать.
+   * 250 мс достаточно для плавного движения и при этом незаметно по нагрузке.
+   *
+   * Опрос идёт только когда трек действительно играет: в паузе позиция
+   * не меняется, и опрашивать нечего.
+   */
+  useEffect(() => {
+    if (!isYouTube || !isPlaying) return;
+
+    const id = window.setInterval(() => {
+      const time = ytGetCurrentTime();
+      const duration = ytGetDuration();
+
+      setCurrentTime(time);
+      setStoreCurrentTime(time);
+
+      if (duration > 0) {
+        setAudioDuration(duration);
+        setStoreDuration(duration);
+      }
+    }, 250);
+
+    return () => window.clearInterval(id);
+  }, [isYouTube, isPlaying, setStoreCurrentTime, setStoreDuration]);
 
   // Прогрессия: считаем прослушанное время раз в секунду, пока играет.
   useEffect(() => {
@@ -248,17 +399,113 @@ export function BottomPlayer({
    */
   const playModeRef = useRef(playMode);
 
+  /*
+   * Текущий трек и обработчик окончания — тоже через ref.
+   *
+   * Обработчики событий YouTube-плеера регистрируются один раз при
+   * монтировании, но должны видеть актуальный трек и актуальную логику
+   * перехода. Без ref-ов они бы «застряли» на значениях первого рендера.
+   */
+  const currentTrackRef = useRef(currentTrack);
+  const handleTrackEndedRef = useRef<() => void>(() => {});
+
   useEffect(() => {
     nextTrackRef.current = onNextTrack;
     setIsPlayingRef.current = setIsPlayingInStore;
     playModeRef.current = playMode;
+    currentTrackRef.current = currentTrack;
   });
 
   useEffect(() => {
     setCurrentTime(0);
     setAudioDuration(0);
 
-    if (!audioRef.current || !currentTrack?.streamUrl) {
+    const track = currentTrackRef.current;
+
+    /*
+     * ВЕТКА YOUTUBE.
+     *
+     * У таких треков нет `streamUrl` — прямой поток YouTube недоступен,
+     * поэтому играет встроенный плеер. Здесь другой запуск, другой сторож
+     * загрузки и другой способ остановки, поэтому логика вынесена отдельно,
+     * а не размазана условиями по общему коду.
+     */
+    if (isYouTubeTrack(track) && track) {
+      shouldAutoPlayRef.current = true;
+      setPlaybackError(false);
+      recoveryAttemptsRef.current = 0;
+
+      const progression = useProgressionStore.getState();
+      progression.registerTrackSource(track.source);
+      progression.registerTrackAdvance(
+        track.id,
+        playModeRef.current === "shuffle",
+      );
+
+      /*
+       * Глушим обычный плеер.
+       *
+       * Без этого при переключении с Telegram-трека на YouTube играли бы оба:
+       * `<audio>` продолжает воспроизведение, пока его не остановят.
+       * `removeAttribute("src")` с последующим `load()` полностью освобождает
+       * поток — иначе браузер продолжит тянуть данные в фоне.
+       */
+      const element = audioRef.current;
+      if (element) {
+        element.pause();
+        element.removeAttribute("src");
+        element.load();
+      }
+
+      // Инициализация асинхронная: первый YouTube-трек в сессии ждёт загрузки
+      // IFrame API. Промис не ждём — трек загрузится по событию onReady.
+      if (isYouTubeReady()) {
+        void ytLoadTrack(track.videoId!, true);
+      } else {
+        void initYouTubePlayer();
+      }
+
+      /*
+       * Сторож для YouTube.
+       *
+       * Обычный `<audio>` сообщает о загрузке событием `canplay`, а плеер
+       * YouTube — состоянием. Поэтому проверяем его состояние: если через
+       * отведённое время воспроизведение так и не началось, считаем трек
+       * сбойным и идём дальше.
+       */
+      const watchdog = window.setTimeout(() => {
+        const state = ytGetState();
+
+        if (state === YT_STATE.PLAYING || state === YT_STATE.BUFFERING) return;
+
+        recoveryAttemptsRef.current += 1;
+
+        if (recoveryAttemptsRef.current <= MAX_RECOVERY_ATTEMPTS) {
+          console.warn(
+            `[player] YouTube-трек не начал играть, попытка ${recoveryAttemptsRef.current}`,
+          );
+          void ytLoadTrack(track.videoId!, true);
+          return;
+        }
+
+        console.error("[player] YouTube-трек недоступен, переключаем дальше");
+        setPlaybackError(true);
+        setIsPlayingRef.current(false);
+        nextTrackRef.current();
+      }, LOAD_TIMEOUT_MS);
+
+      return () => window.clearTimeout(watchdog);
+    }
+
+    /*
+     * ВЕТКА ОБЫЧНЫХ ИСТОЧНИКОВ (Telegram, Audius и прочие).
+     *
+     * Здесь играет `<audio>`. Перед этим глушим YouTube-плеер — по той же
+     * причине, что и в ветке выше: два источника не должны звучать разом.
+     */
+    ytPause();
+
+    if (!audioRef.current || !track?.streamUrl) {
       setIsPlayingRef.current(false);
       shouldAutoPlayRef.current = false;
       return;
@@ -275,9 +522,9 @@ export function BottomPlayer({
      * от лишних рендеров.
      */
     const progression = useProgressionStore.getState();
-    progression.registerTrackSource(currentTrack.source);
+    progression.registerTrackSource(track.source);
     progression.registerTrackAdvance(
-      currentTrack.id,
+      track.id,
       playModeRef.current === "shuffle",
     );
 
@@ -342,16 +589,22 @@ export function BottomPlayer({
 
     return () => window.clearTimeout(watchdog);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentTrack?.id, currentTrack?.streamUrl]);
+  }, [currentTrack?.id, currentTrack?.streamUrl, currentTrack?.videoId]);
 
   function handleSeek(event: ChangeEvent<HTMLInputElement>) {
-    if (!audioRef.current || !hasAudioSource) return;
+    if (!canPlay) return;
 
     const nextTime = Number(event.target.value);
 
     if (Number.isNaN(nextTime)) return;
 
-    audioRef.current.currentTime = nextTime;
+    // Перемотка идёт в тот плеер, который сейчас звучит.
+    if (isYouTube) {
+      ytSeek(nextTime);
+    } else if (audioRef.current) {
+      audioRef.current.currentTime = nextTime;
+    }
+
     setCurrentTime(nextTime);
     setStoreCurrentTime(nextTime);
   }
@@ -380,20 +633,58 @@ export function BottomPlayer({
   }
 
   function togglePlayback() {
-    if (!audioRef.current || !hasAudioSource) return;
+    if (!canPlay) return;
 
-    if (audioRef.current.paused) {
+    /*
+     * Состояние воспроизведения спрашиваем у того плеера, который звучит.
+     *
+     * У `<audio>` это свойство `paused`, у встроенного YouTube-плеера —
+     * состояние `PLAYING`. Спрашивать не тот плеер нельзя: кнопка сделала бы
+     * противоположное задуманному.
+     */
+    const isCurrentlyPlaying = isYouTube
+      ? ytGetState() === YT_STATE.PLAYING
+      : !audioRef.current?.paused;
+
+    if (!isCurrentlyPlaying) {
       shouldAutoPlayRef.current = true;
       void startPlayback();
-    } else {
-      shouldAutoPlayRef.current = false;
-      audioRef.current.pause();
-      setIsPlayingInStore(false);
+      return;
     }
+
+    shouldAutoPlayRef.current = false;
+
+    if (isYouTube) ytPause();
+    else audioRef.current?.pause();
+
+    setIsPlayingInStore(false);
   }
 
   async function startPlayback() {
-    if (!audioRef.current || !hasAudioSource) return;
+    if (!canPlay) return;
+
+    /*
+     * Запуск YouTube-трека.
+     *
+     * Прямой поток у YouTube недоступен, воспроизведением управляет встроенный
+     * плеер. Состояние в стор придёт по событию `onPlaying` — здесь его
+     * выставлять нельзя, иначе интерфейс покажет «играет» раньше, чем звук
+     * действительно пойдёт.
+     */
+    if (isYouTube) {
+      const track = currentTrackRef.current;
+      if (!track?.videoId) return;
+
+      if (isYouTubeReady()) {
+        ytPlay();
+      } else {
+        // Плеер ещё поднимается: загрузка произойдёт по событию `onReady`.
+        await ytLoadTrack(track.videoId, true);
+      }
+      return;
+    }
+
+    if (!audioRef.current) return;
 
     try {
       // Разблокируем AudioContext после пользовательского жеста.
@@ -438,23 +729,35 @@ export function BottomPlayer({
        * состоялся. `playNext` для repeat-one не вызывается — зацикливание
        * делает сам плеер.
        */
-      if (currentTrack) {
+      const repeatTrack = currentTrackRef.current;
+      if (repeatTrack) {
         useProgressionStore
           .getState()
-          .registerRepeatLoop(currentTrack.id);
+          .registerRepeatLoop(repeatTrack.id);
       }
 
-      // Зацикливаем текущий трек. `.catch` обязателен: без него отклонённый
-      // `play()` становится необработанным отказом и воспроизведение молча
-      // умирает на 0:00.
-      const element = audioRef.current;
-      if (element) {
-        element.currentTime = 0;
-        void element.play().catch((error: unknown) => {
-          console.warn("[player] повтор трека не удался:", error);
-          setIsPlayingInStore(false);
-        });
+      /*
+       * Зацикливание.
+       *
+       * Для YouTube-трека повтор запускает встроенный плеер: он умеет играть
+       * видео заново с начала. Для обычных треков позицию сбрасывает
+       * `<audio>`, а `.catch` обязателен — без него отклонённый `play()`
+       * становится необработанным отказом и воспроизведение молча умирает.
+       */
+      if (isYouTubeRef.current) {
+        ytSeek(0);
+        ytPlay();
+      } else {
+        const element = audioRef.current;
+        if (element) {
+          element.currentTime = 0;
+          void element.play().catch((error: unknown) => {
+            console.warn("[player] повтор трека не удался:", error);
+            setIsPlayingInStore(false);
+          });
+        }
       }
+
       restartCurrent();
       return;
     }
@@ -473,7 +776,7 @@ export function BottomPlayer({
    */
   function handleAudioError() {
     const element = audioRef.current;
-    if (!element || !hasAudioSource) return;
+    if (!element || !canPlay) return;
 
     const mediaError = element.error;
 
@@ -498,6 +801,16 @@ export function BottomPlayer({
     setIsPlayingInStore(false);
     onNextTrack();
   }
+
+  /**
+   * Актуальная ссылка на обработчик окончания трека.
+   *
+   * Нужна для событий YouTube-плеера: они регистрируются один раз, и должны
+   * вызывать свежую версию функции. Без этого обработчик «застрял» бы на
+   * значениях первого рендера — например, на старом режиме воспроизведения,
+   * и повтор трека работал бы неправильно.
+   */
+  handleTrackEndedRef.current = handleTrackEnded;
 
   const title = currentTrack?.title ?? t("player.notitle");
   const artist = currentTrack?.artist ?? t("player.noartist");
@@ -547,6 +860,48 @@ export function BottomPlayer({
     setPlaylistMenuState("open");
   }
 
+  /*
+   * Закрытие выпадающих окон по клику вне них.
+   *
+   * Слушаем на фазе ПЕРЕХВАТА (`capture`), а не на всплытии: клик по кнопке
+   * открытия должен сначала обработаться здесь и не мешать собственному
+   * обработчику кнопки. Кнопки исключаем из проверки — иначе окно закрывалось
+   * бы сразу после открытия, потому что клик по кнопке формально «вне окна».
+   *
+   * Слушатель навешивается только когда окно открыто: держать его постоянно
+   * значило бы проверять каждый клик по интерфейсу без необходимости.
+   */
+  useEffect(() => {
+    if (!isPlaylistMenuVisible && !isQueueVisible) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+
+      // Клик по кнопке-переключателю обрабатывает сама кнопка.
+      if (
+        playlistButtonRef.current?.contains(target) ||
+        queueButtonRef.current?.contains(target)
+      ) {
+        return;
+      }
+
+      if (playlistMenuRef.current && !playlistMenuRef.current.contains(target)) {
+        closePlaylistMenu();
+      }
+
+      if (queueMenuRef.current && !queueMenuRef.current.contains(target)) {
+        closeQueueMenu();
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+
+    return () =>
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaylistMenuVisible, isQueueVisible]);
+
   function handleAddToPlaylist(playlistId: string) {
     if (!currentTrack) return;
 
@@ -574,7 +929,14 @@ export function BottomPlayer({
            */
           key="noctra-audio"
           ref={audioRef}
-          src={currentTrack?.streamUrl}
+          /*
+           * Источник подставляем только для обычных треков.
+           *
+           * YouTube-треки играет встроенный плеер, и `src` здесь быть не должно:
+           * иначе браузер начнёт грузить заведомо недоступный прямой поток,
+           * сработает `onError`, и плеер посчитает исправный трек сбойным.
+           */
+          src={isYouTube ? undefined : currentTrack?.streamUrl}
           preload="metadata"
           crossOrigin="anonymous"
           onError={handleAudioError}
@@ -604,7 +966,20 @@ export function BottomPlayer({
         
       {isPlaylistMenuVisible && (
         <div
-          className={`absolute bottom-[calc(100%+12px)] left-32 z-30 w-[360px] overflow-hidden rounded-3xl border border-purple-300/15 bg-black/80 shadow-2xl shadow-purple-950/50 backdrop-blur-2xl ${
+          ref={playlistMenuRef}
+          /*
+           * Позиция: левый край окна совпадает с левым краем плеера.
+           *
+           * Контейнер плеера — `<footer>` с относительным позиционированием
+           * и внутренним отступом `px-5`, поэтому `left-0` ставит окно ровно
+           * по краю панели, без центрирования. Раньше стояло `left-1/2`
+           * с `-translate-x-1/2`: окно уезжало в середину экрана и выглядело
+           * оторванным от кнопки, которая его открыла.
+           *
+           * `bottom-[calc(100%+16px)]` поднимает окно над панелью, чтобы оно
+           * не перекрывало элементы управления плеером.
+           */
+          className={`absolute bottom-[calc(100%+16px)] left-0 z-50 w-[min(92vw,360px)] overflow-hidden rounded-2xl border border-white/10 bg-[#121118]/95 shadow-[0_12px_40px_rgba(0,0,0,0.85)] backdrop-blur-xl ${
             playlistMenuState === "closing"
               ? "animate-[playerMenuOut_240ms_cubic-bezier(0.7,0,0.84,0)_forwards]"
               : "animate-[playerMenuIn_340ms_cubic-bezier(0.16,1,0.3,1)]"
@@ -701,7 +1076,14 @@ export function BottomPlayer({
 
       {isQueueVisible && (
         <div
-          className={`absolute bottom-[calc(100%+16px)] right-4 z-30 flex max-h-[60vh] w-[380px] flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#0d0f12]/95 shadow-2xl shadow-black/60 backdrop-blur-xl ${
+          ref={queueMenuRef}
+          /*
+           * Тот же плотный стиль, что и у окна «Добавить в плейлист»:
+           * полупрозрачные панели сливались со списком треков под ними.
+           * `right-4` оставляем — окно очереди привязано к своей кнопке
+           * справа, а не по центру.
+           */
+          className={`absolute bottom-[calc(100%+16px)] right-4 z-50 flex max-h-[60vh] w-[min(92vw,380px)] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#121118]/95 shadow-[0_12px_40px_rgba(0,0,0,0.85)] backdrop-blur-xl ${
             queueMenuState === "closing"
               ? "animate-[playerMenuOut_240ms_cubic-bezier(0.7,0,0.84,0)_forwards]"
               : "animate-[playerMenuIn_340ms_cubic-bezier(0.16,1,0.3,1)]"
@@ -921,6 +1303,7 @@ export function BottomPlayer({
       </div>
     <div className="flex items-center gap-2">
       <button
+        ref={playlistButtonRef}
         onClick={togglePlaylistMenu}
         disabled={!currentTrack}
         className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-purple-100/60 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35 ${
@@ -985,10 +1368,10 @@ export function BottomPlayer({
 
           <button
             onClick={togglePlayback}
-            disabled={!hasAudioSource}
+            disabled={!canPlay}
             className="rounded-full bg-purple-500/30 p-3 text-white shadow-lg shadow-purple-900/30 transition hover:bg-purple-500/45 disabled:cursor-not-allowed disabled:opacity-40"
             title={
-              hasAudioSource ? t("player.playpause") : t("player.noSource")
+              canPlay ? t("player.playpause") : t("player.noSource")
             }
           >
             {isPlaying ? <Pause size={18} /> : <Play size={18} />}
@@ -1005,26 +1388,27 @@ export function BottomPlayer({
         </div>
 
         <div className="flex w-full max-w-xl items-center gap-3 text-[11px] text-purple-100/35">
-          <span>{hasAudioSource ? formatTime(currentTime) : "—"}</span>
+          <span>{canPlay ? formatTime(currentTime) : "—"}</span>
 
         <input
           type="range"
           min="0"
           max={safeAudioDuration || 0}
           step="0.1"
-          value={hasAudioSource ? Math.min(currentTime, safeAudioDuration || 0) : 0}
+          value={canPlay ? Math.min(currentTime, safeAudioDuration || 0) : 0}
           onChange={handleSeek}
-          disabled={!hasAudioSource}
+          disabled={!canPlay}
           style={getRangeStyle(progress)}
           className="noctra-range flex-1 cursor-pointer disabled:cursor-not-allowed"
         />
 
-        <span>{hasAudioSource ? formatTime(safeAudioDuration) : duration}</span>
+        <span>{canPlay ? formatTime(safeAudioDuration) : duration}</span>
 
         </div>
       </div>
 
         <button
+          ref={queueButtonRef}
           onClick={toggleQueueMenu}
           className={`relative rounded-full p-2 transition hover:bg-white/10 hover:text-white ${
             queueMenuState === "open" ? "bg-purple-500/20 text-white" : ""

@@ -4,8 +4,11 @@ import { motion } from "motion/react";
 
 import type { PlaylistTrack } from "../../types/playlist";
 import { TrackCover } from "./TrackCover";
+import { YouTubeGlyph } from "../ui/YouTubeGlyph";
 import { useT } from "../../i18n/useT";
 import { toast } from "../ui/Toast";
+import { durationToSeconds } from "../../lib/format";
+import { MIX_DURATION_SECONDS } from "../../services/youtubeSearch";
 
 type TrackRowProps = {
   track: PlaylistTrack;
@@ -65,6 +68,11 @@ export const TrackRow = memo(function TrackRow({
 
   const toggleFavorite = onToggleFavoriteTrack ?? onToggleFavorite;
   const isActive = isCurrent && isPlaying;
+
+  /** Длинная запись (микс, сет) — помечаем, чтобы не путать с треком. */
+  const isLongMix =
+    track.source === "YouTube" &&
+    durationToSeconds(track.duration) >= MIX_DURATION_SECONDS;
 
   /* ── стабильные колбэки: drag-жест дёргается на каждый кадр ── */
   const handleDragStart = useCallback(() => setIsDragging(true), []);
@@ -208,12 +216,29 @@ export const TrackRow = memo(function TrackRow({
             {track.title}
           </p>
 
-          <p className="truncate text-xs text-purple-100/45">
-            {track.artist} · {track.source}
+          <p className="flex items-center gap-1.5 truncate text-xs text-purple-100/45">
+            <span className="truncate">{track.artist}</span>
+            <span aria-hidden="true">·</span>
+            {/* Знак источника: у YouTube фирменный красный, он узнаётся сразу
+                и помогает отличить треки из разных сервисов в общем списке. */}
+            {track.source === "YouTube" && <YouTubeGlyph size={11} />}
+            <span className="shrink-0">{track.source}</span>
           </p>
         </div>
 
         <span className="shrink-0 text-xs text-purple-100/35">
+          {/*
+            Метка «микс» для длинных записей.
+            
+            В выдаче YouTube много многочасовых сборников, и по названию
+            не всегда понятно, что это не обычный трек. Метка помогает
+            выбрать осознанно — при этом такие записи не скрываются.
+          */}
+          {isLongMix && (
+            <span className="mr-1.5 rounded border border-red-400/25 bg-red-600/15 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-red-200/80">
+              {t("workspace.youtube.mixBadge")}
+            </span>
+          )}
           {track.duration}
         </span>
 

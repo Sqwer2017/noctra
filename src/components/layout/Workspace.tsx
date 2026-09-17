@@ -17,6 +17,9 @@ import {
   syncTelegramTracks,
 } from "../../services/telegramTracks";
 import { searchAudiusTracks } from "../../services/audius";
+import { searchYouTube } from "../../services/youtubeSearch";
+import type { YouTubeSearchMode } from "../../services/youtubeSearch";
+import { YouTubeGlyph } from "../ui/YouTubeGlyph";
 
 import { getWindowMeta } from "../../data/windowRegistry";
 import type { WindowId } from "../../types/windows";
@@ -518,12 +521,35 @@ function MusicSearchWindowContent({
   const [telegramError, setTelegramError] = useState<string | null>(null);
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
 
-  // ── Источник музыки: Telegram (сервер) или Audius (открытый API) ──
-  const [source, setSource] = useState<"telegram" | "audius">("telegram");
+  // ── Источники музыки: Telegram (сервер), Audius и YouTube (открытые API) ──
+  const [source, setSource] = useState<"telegram" | "audius" | "youtube">(
+    "telegram",
+  );
   const [audiusQuery, setAudiusQuery] = useState("");
   const [audiusResults, setAudiusResults] = useState<PlaylistTrack[]>([]);
   const [isLoadingAudius, setIsLoadingAudius] = useState(false);
   const [audiusError, setAudiusError] = useState<string | null>(null);
+
+  /*
+   * YouTube.
+   *
+   * Поиск идёт через публичные зеркала Invidious, поэтому здесь есть
+   * отдельный случай «все зеркала недоступны» — его нельзя показывать
+   * как «ничего не найдено».
+   */
+  const [youtubeQuery, setYoutubeQuery] = useState("");
+  const [youtubeResults, setYoutubeResults] = useState<PlaylistTrack[]>([]);
+  const [isLoadingYoutube, setIsLoadingYoutube] = useState(false);
+  const [youtubeError, setYoutubeError] = useState<string | null>(null);
+
+  /*
+   * Режим поиска YouTube.
+   *
+   * По умолчанию «треки»: без фильтра половину выдачи занимают обзоры,
+   * влоги и многочасовые сборники. Режим «все видео» нужен для редких
+   * случаев — ремиксы, концерты и лайвы часто не помечены как музыка.
+   */
+  const [youtubeMode, setYoutubeMode] = useState<YouTubeSearchMode>("music");
 
   async function runAudiusSearch() {
     const query = audiusQuery.trim();
@@ -541,6 +567,25 @@ function MusicSearchWindowContent({
       setAudiusResults([]);
     } finally {
       setIsLoadingAudius(false);
+    }
+  }
+
+  async function runYoutubeSearch() {
+    const query = youtubeQuery.trim();
+    if (!query) return;
+
+    try {
+      setIsLoadingYoutube(true);
+      setYoutubeError(null);
+      const results = await searchYouTube(query, youtubeMode);
+      setYoutubeResults(results);
+    } catch (error) {
+      setYoutubeError(
+        error instanceof Error ? error.message : "youtube_unreachable",
+      );
+      setYoutubeResults([]);
+    } finally {
+      setIsLoadingYoutube(false);
     }
   }
 
@@ -578,21 +623,23 @@ function MusicSearchWindowContent({
     () =>
       source === "audius"
         ? audiusResults
-        : normalizedSearchQuery
-          ? tracks.filter((track) => {
-              const searchableText = [
-                track.title,
-                track.artist,
-                track.source,
-                track.duration,
-              ]
-                .join(" ")
-                .toLowerCase();
+        : source === "youtube"
+          ? youtubeResults
+          : normalizedSearchQuery
+            ? tracks.filter((track) => {
+                const searchableText = [
+                  track.title,
+                  track.artist,
+                  track.source,
+                  track.duration,
+                ]
+                  .join(" ")
+                  .toLowerCase();
 
-              return searchableText.includes(normalizedSearchQuery);
-            })
-          : tracks,
-    [source, audiusResults, tracks, normalizedSearchQuery],
+                return searchableText.includes(normalizedSearchQuery);
+              })
+            : tracks,
+    [source, audiusResults, youtubeResults, tracks, normalizedSearchQuery],
   );
 
   // Стабильные колбэки и быстрый lookup избранного для виртуализированного списка.
@@ -630,20 +677,39 @@ function MusicSearchWindowContent({
   return (
     <div className="flex h-full flex-col gap-4">
       {/* Табы источника */}
-      <div className="grid grid-cols-2 rounded-2xl border border-white/10 bg-black/25 p-1">
+      <div className="grid grid-cols-3 rounded-2xl border border-white/10 bg-black/25 p-1">
         {([
-          { id: "telegram", label: "Telegram" },
-          { id: "audius", label: "Audius" },
+          { id: "telegram", label: "Telegram", accent: false },
+          { id: "audius", label: "Audius", accent: false },
+          { id: "youtube", label: "YouTube", accent: true },
         ] as const).map((item) => (
           <button
             key={item.id}
             onClick={() => setSource(item.id)}
-            className={`rounded-xl px-4 py-2 text-sm transition ${
+            className={`flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-sm transition ${
               source === item.id
-                ? "bg-purple-500/25 text-white"
+                ? item.accent
+                  ? // Фирменный красный YouTube: активная вкладка узнаётся сразу.
+                    "bg-red-600/25 text-white shadow-[0_0_18px_-6px_rgba(255,0,0,0.8)]"
+                  : "bg-purple-500/25 text-white"
                 : "text-purple-100/45 hover:text-white"
             }`}
           >
+            {item.accent && (
+              /*
+               * Знак YouTube всегда фирменного красного.
+               *
+               * Перекрашивать его нельзя (требование брендбука), поэтому
+               * неактивное состояние показываем прозрачностью, а не цветом:
+               * классы вида `text-red-400` на SVG с заданным `fill` не влияют.
+               */
+              <YouTubeGlyph
+                size={14}
+                className={`transition-opacity ${
+                  source === item.id ? "opacity-100" : "opacity-50"
+                }`}
+              />
+            )}
             {item.label}
           </button>
         ))}
@@ -692,7 +758,7 @@ function MusicSearchWindowContent({
             </button>
           </div>
         </>
-      ) : (
+      ) : source === "audius" ? (
         <>
           <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-purple-100/45 transition focus-within:border-purple-300/35">
             <Search size={16} />
@@ -732,6 +798,84 @@ function MusicSearchWindowContent({
               : t("workspace.audius.searchAction")}
           </button>
         </>
+      ) : null}
+
+      {source === "youtube" && (
+        <>
+          <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-purple-100/45 transition focus-within:border-red-400/40">
+            <Search size={16} />
+
+            <input
+              value={youtubeQuery}
+              onChange={(event) => setYoutubeQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void runYoutubeSearch();
+              }}
+              placeholder={t("workspace.youtube.search")}
+              className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-purple-100/35"
+            />
+
+            {youtubeQuery && (
+              <button
+                onClick={() => {
+                  setYoutubeQuery("");
+                  setYoutubeResults([]);
+                  setYoutubeError(null);
+                }}
+                className="inline-flex aspect-square items-center justify-center rounded-full p-1 leading-none text-purple-100/35 transition hover:bg-white/10 hover:text-white"
+                title={t("workspace.search.clear")}
+              >
+                <X size={14} className="m-0 block" />
+              </button>
+            )}
+          </div>
+
+          <button
+            onClick={() => void runYoutubeSearch()}
+            disabled={isLoadingYoutube || !youtubeQuery.trim()}
+            className="rounded-2xl border border-red-400/25 bg-red-600/15 px-4 py-3 text-sm text-red-50 transition hover:bg-red-600/25 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {isLoadingYoutube
+              ? t("workspace.telegram.loading")
+              : t("workspace.youtube.searchAction")}
+          </button>
+
+          {/*
+            Переключатель режима поиска.
+
+            Стоит рядом с полем, а не в настройках: это выбор на один запрос,
+            и менять его удобнее там же, где ищешь. По умолчанию «треки» —
+            без фильтра в выдаче много обзоров, влогов и многочасовых сборников.
+          */}
+          <div className="flex items-center gap-2">
+            <div className="flex shrink-0 rounded-xl border border-white/10 bg-black/25 p-0.5">
+              {(
+                [
+                  { id: "music", label: t("workspace.youtube.modeTracks") },
+                  { id: "all", label: t("workspace.youtube.modeAll") },
+                ] as const
+              ).map((option) => (
+                <button
+                  key={option.id}
+                  onClick={() => setYoutubeMode(option.id)}
+                  className={`rounded-lg px-3 py-1.5 text-xs transition ${
+                    youtubeMode === option.id
+                      ? "bg-white/10 text-white"
+                      : "text-purple-100/45 hover:text-white"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            <p className="min-w-0 flex-1 text-[11px] leading-4 text-purple-100/35">
+              {youtubeMode === "music"
+                ? t("workspace.youtube.modeTracksHint")
+                : t("workspace.youtube.modeAllHint")}
+            </p>
+          </div>
+        </>
       )}
 
       {source === "telegram" && (
@@ -765,6 +909,21 @@ function MusicSearchWindowContent({
       {source === "audius" && audiusError && (
         <div className="rounded-2xl border border-red-300/20 bg-red-500/10 p-3 text-sm text-red-100/75">
           {t("workspace.audius.error")}
+        </div>
+      )}
+
+      {/*
+        Ошибка поиска YouTube.
+
+        Различаем два случая, и это важно для пользователя:
+        недоступность зеркал — сбой сервиса (стоит предложить другие вкладки),
+        остальное — обычная неудача поиска.
+      */}
+      {source === "youtube" && youtubeError && (
+        <div className="rounded-2xl border border-red-300/20 bg-red-500/10 p-3 text-sm text-red-100/75">
+          {youtubeError === "youtube_unreachable"
+            ? t("workspace.youtube.unreachable")
+            : t("workspace.youtube.error")}
         </div>
       )}
 
@@ -868,13 +1027,19 @@ function MusicSearchWindowContent({
               <p className="text-sm font-semibold text-white">
                 {source === "audius" && !audiusQuery.trim() && !audiusResults.length
                   ? t("workspace.audius.hint")
-                  : t("workspace.tracks.empty")}
+                  : source === "youtube" &&
+                      !youtubeQuery.trim() &&
+                      !youtubeResults.length
+                    ? t("workspace.youtube.hint")
+                    : t("workspace.tracks.empty")}
               </p>
 
               <p className="mt-2 text-xs leading-5 text-purple-100/45">
                 {source === "audius"
                   ? t("workspace.audius.hintBody")
-                  : t("workspace.tracks.empty.body")}
+                  : source === "youtube"
+                    ? t("workspace.youtube.hintBody")
+                    : t("workspace.tracks.empty.body")}
               </p>
             </div>
           </div>
@@ -1794,6 +1959,7 @@ function SettingsWindowContent() {
     { key: "SoundCloud", label: t("settings.soundcloud"), icon: <Music size={16} /> },
     { key: "Audius", label: t("settings.audius"), icon: <Heart size={16} /> },
     { key: "Telegram", label: t("settings.telegram.bot"), icon: <Bot size={16} /> },
+    { key: "YouTube", label: t("settings.youtube"), icon: <YouTubeGlyph size={16} /> },
   ];
 
   const langOptions: { value: "auto" | "ru" | "en"; label: string }[] = [

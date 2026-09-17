@@ -496,6 +496,185 @@ app.get("/api/telegram/file", async (req, res) => {
   }
 });
 
+/**
+ * Поиск на YouTube через зеркала Invidious.
+ *
+ * ЗАЧЕМ ПРОКСИ, А НЕ ЗАПРОС ИЗ БРАУЗЕРА
+ * -------------------------------------
+ * Публичные зеркала Invidious почти все запрещают запросы с чужих доменов:
+ * отдают `Access-Control-Allow-Origin` со своим адресом вместо `*`. Браузер
+ * такой ответ блокирует, и поиск падает с ошибкой CORS, хотя само зеркало
+ * исправно. Из десяти проверенных зеркал из браузера работало ОДНО.
+ *
+ * Запрос с сервера этих ограничений не знает: CORS — правило браузера, а не
+ * сети. Поэтому перебираем зеркала здесь и отдаём клиенту уже готовый JSON.
+ * Заодно снимается проблема со сменой зеркал: клиенту не нужно знать,
+ * какие из них живы сейчас.
+ *
+ * Официальный YouTube Data API не используем: у него квота 100 поисков
+ * в сутки, которой не хватит даже небольшой аудитории.
+ */
+
+/** Зеркала: перебираются по очереди, пока одно не ответит. */
+const YOUTUBE_MIRRORS = [
+  "https://invidious.f5.si",
+  "https://invidious.materialio.us",
+  "https://invidious.protokolla.fi",
+  "https://yewtu.be",
+  "https://inv.nadeko.net",
+];
+
+/** Сколько ждать ответа от одного зеркала. */
+const YOUTUBE_MIRROR_TIMEOUT_MS = 5000;
+
+/**
+ * Сколько страниц запрашивать у зеркала.
+ *
+ * Одна страница Invidious отдаёт ровно 20 результатов — меньше, чем нужно
+ * для нормального выбора. Параметр `page` работает: вторая страница почти
+ * не пересекается с первой (проверено: 4 общих элемента из 20). Поэтому
+ * берём несколько страниц параллельно и склеиваем результат.
+ *
+ * Три страницы — компромисс: до 60 результатов, что после отсева сборников
+ * и коротких роликов даёт около 40 треков. Больше запрашивать смысла нет:
+ * пользователь всё равно просматривает только начало списка, а время ответа
+ * растёт.
+ */
+const YOUTUBE_SEARCH_PAGES = 3;
+
+/** Запрашивает одну страницу поиска у зеркала. */
+async function fetchYouTubePage(mirror, params, page, timeoutMs) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const pageParams = new URLSearchParams(params);
+    if (page > 1) pageParams.set("page", String(page));
+
+    const response = await fetch(
+      `${mirror}/api/v1/search?${pageParams.toString()}`,
+      {
+        signal: controller.signal,
+        headers: { Accept: "application/json" },
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    /*
+     * Проверяем тип содержимого: часть зеркал отдаёт 200 с HTML-страницей
+     * вместо данных. Без этой проверки мы попытались бы разобрать HTML
+     * как JSON и потратили попытку впустую.
+     */
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("json")) {
+      throw new Error("не JSON");
+    }
+
+    const data = await response.json();
+
+    if (!Array.isArray(data)) {
+      throw new Error("неожиданный формат");
+    }
+
+    return data;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+app.get("/api/youtube/search", async (req, res) => {
+  const query = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  const mode = req.query.mode === "all" ? "all" : "music";
+
+  if (!query) {
+    return res.status(400).json({ ok: false, message: "Missing query" });
+  }
+
+  /*
+   * Фильтр `music_songs` повышает приоритет музыки в выдаче.
+   *
+   * Важно: он не гарантирует чистоту результата — часть нецелевого контента
+   * всё равно проходит. Дополнительный отсев по длительности делает клиент,
+   * потому что там же он нужен и для подписи «микс».
+   */
+  const params = new URLSearchParams({ q: query, type: "video" });
+  if (mode === "music") params.set("filter", "music_songs");
+
+  const errors = [];
+
+  for (const mirror of YOUTUBE_MIRRORS) {
+    try {
+      /*
+       * Страницы запрашиваем параллельно: последовательно три запроса
+       * заняли бы до 15 секунд, а так — время самой медленной страницы.
+       */
+      const pages = await Promise.all(
+        Array.from({ length: YOUTUBE_SEARCH_PAGES }, (_, index) =>
+          fetchYouTubePage(
+            mirror,
+            params,
+            index + 1,
+            YOUTUBE_MIRROR_TIMEOUT_MS,
+          ).catch((error) => {
+            // Одна упавшая страница не должна ломать весь поиск.
+            errors.push(
+              `${mirror} стр.${index + 1}: ${error instanceof Error ? error.message : "ошибка"}`,
+            );
+            return [];
+          }),
+        ),
+      );
+
+      /*
+       * Склеиваем страницы без дублей.
+       *
+       * Invidious иногда повторяет одни и те же видео на соседних страницах
+       * (проверено: 4 общих элемента из 20). Без дедупликации в списке
+       * появились бы клоны.
+       */
+      const seen = new Set();
+      const items = [];
+
+      for (const page of pages) {
+        for (const video of page) {
+          const id = video?.videoId;
+          if (!id || seen.has(id)) continue;
+
+          seen.add(id);
+          items.push(video);
+        }
+      }
+
+      if (items.length === 0) {
+        errors.push(`${mirror}: пустой результат`);
+        continue;
+      }
+
+      console.log(
+        `[youtube] поиск через ${mirror}: ${items.length} результатов ` +
+          `(${pages.map((p) => p.length).join("+")}, дублей убрано ${pages.reduce((sum, p) => sum + p.length, 0) - items.length})`,
+      );
+
+      return res.json({ ok: true, items, mirror });
+    } catch (error) {
+      errors.push(
+        `${mirror}: ${error instanceof Error ? error.message : "ошибка"}`,
+      );
+    }
+  }
+
+  console.warn("[youtube] все зеркала недоступны:", errors.join("; "));
+
+  res.status(503).json({
+    ok: false,
+    message: "youtube_unreachable",
+    details: errors,
+  });
+});
+
 await loadStoredTelegramTracks();
 
 app.listen(PORT, () => {

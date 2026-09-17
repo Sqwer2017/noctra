@@ -306,6 +306,22 @@ const ru = {
   "workspace.audius.error": "Не удалось получить данные из Audius. Проверь соединение и попробуй ещё раз.",
   "workspace.audius.hint": "Поиск в Audius",
   "workspace.audius.hintBody": "Введи название трека или исполнителя и нажми «Искать в Audius».",
+  "workspace.youtube.search": "Поиск треков на YouTube...",
+  "workspace.youtube.searchAction": "Искать на YouTube",
+  "workspace.youtube.error":
+    "Не удалось выполнить поиск. Попробуй ещё раз или измени запрос.",
+  "workspace.youtube.unreachable":
+    "Сервис поиска YouTube временно недоступен. Попробуй позже или поищи во вкладках Telegram и Audius.",
+  "workspace.youtube.hint": "Поиск на YouTube",
+  "workspace.youtube.hintBody":
+    "Введи название трека или исполнителя и нажми «Искать на YouTube».",
+  "workspace.youtube.mixBadge": "микс",
+  "workspace.youtube.modeTracks": "Треки",
+  "workspace.youtube.modeAll": "Все видео",
+  "workspace.youtube.modeTracksHint":
+    "Только музыка: без обзоров, влогов и многочасовых сборников.",
+  "workspace.youtube.modeAllHint":
+    "Все видео: пригодится для ремиксов, концертов и лайвов — их часто не помечают как музыку.",
   "workspace.tracks.empty": "Треки не найдены",
   "workspace.tracks.empty.body": "Попробуй другое название, исполнителя или источник.",
   "workspace.add.playlist": "Добавить в плейлист",
@@ -418,6 +434,7 @@ const ru = {
   "settings.musicSources": "Музыкальные источники",
   "settings.soundcloud": "SoundCloud",
   "settings.audius": "Audius",
+  "settings.youtube": "YouTube",
   "settings.telegram.bot": "Telegram-бот",
   "settings.notConnected":
     "Пока не подключено. Настраивается через бэкенд/serverless-функции, а не напрямую во фронтенд-коде.",

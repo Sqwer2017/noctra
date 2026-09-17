@@ -297,6 +297,21 @@ const en = {
   "workspace.audius.error": "Could not fetch data from Audius. Check your connection and try again.",
   "workspace.audius.hint": "Search Audius",
   "workspace.audius.hintBody": "Type a track or artist name and press “Search Audius”.",
+  "workspace.youtube.search": "Search tracks on YouTube...",
+  "workspace.youtube.searchAction": "Search YouTube",
+  "workspace.youtube.error": "Search failed. Try again or change your query.",
+  "workspace.youtube.unreachable":
+    "YouTube search service is temporarily unavailable. Try again later or search in the Telegram and Audius tabs.",
+  "workspace.youtube.hint": "Search YouTube",
+  "workspace.youtube.hintBody":
+    "Type a track or artist name and press “Search YouTube”.",
+  "workspace.youtube.mixBadge": "mix",
+  "workspace.youtube.modeTracks": "Tracks",
+  "workspace.youtube.modeAll": "All videos",
+  "workspace.youtube.modeTracksHint":
+    "Music only: no reviews, vlogs or hours-long compilations.",
+  "workspace.youtube.modeAllHint":
+    "All videos: useful for remixes, concerts and live sets — they are often not tagged as music.",
   "workspace.tracks.empty": "No tracks found",
   "workspace.tracks.empty.body": "Try another title, artist or source.",
   "workspace.add.playlist": "Add to playlist",
@@ -400,6 +415,7 @@ const en = {
   "settings.musicSources": "Music sources",
   "settings.soundcloud": "SoundCloud",
   "settings.audius": "Audius",
+  "settings.youtube": "YouTube",
   "settings.telegram.bot": "Telegram Bot",
   "settings.notConnected":
     "Not connected yet. Set up through backend/serverless functions, not directly in frontend code.",
