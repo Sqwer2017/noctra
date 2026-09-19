@@ -221,6 +221,19 @@ export function BottomPlayer({
 
         setIsPlayingInStore(false);
       },
+      /*
+       * Реальное состояние воспроизведения.
+       *
+       * У источников оно лежит в разных местах: у `<audio>` — свойство
+       * `paused`, у встроенного YouTube-плеера — код состояния. Спрашиваем
+       * тот плеер, который сейчас звучит, иначе ответ был бы всегда «пауза».
+       */
+      getIsPlaying: () => {
+        if (isYouTubeRef.current) {
+          return ytGetState() === YT_STATE.PLAYING;
+        }
+        return Boolean(audioRef.current && !audioRef.current.paused);
+      },
       seek: (seconds) => {
         if (isYouTubeRef.current) {
           ytSeek(seconds);
@@ -296,10 +309,23 @@ export function BottomPlayer({
   useEffect(() => {
     setYouTubeCallbacks({
       onReady: () => {
-        // Плеер поднялся: если YouTube-трек уже выбран, загружаем его.
+        /*
+         * Плеер поднялся; если YouTube-трек уже выбран — готовим его.
+         *
+         * Загружаем ВСЕГДА в режиме cue (без автозапуска).
+         *
+         * Раньше здесь передавался `shouldAutoPlayRef.current` — флаг,
+         * оставшийся с прошлого запуска. Из-за этого плеер мог сам включить
+         * музыку после паузы: достаточно было, чтобы IFrame пересоздался
+         * или вкладка «проснулась» — onReady срабатывал и запускал трек,
+         * хотя пользователь его останавливал.
+         *
+         * Запуск — только по явному действию: тап по треку или кнопка play.
+         * Подготовка (cue) безопасна: трек загружен и готов, но молчит.
+         */
         const track = currentTrackRef.current;
         if (isYouTubeTrack(track) && track?.videoId) {
-          void ytLoadTrack(track.videoId, shouldAutoPlayRef.current);
+          void ytLoadTrack(track.videoId, false);
         }
       },
       onPlaying: () => {
@@ -309,6 +335,15 @@ export function BottomPlayer({
       },
       onPaused: () => {
         setIsPlayingRef.current(false);
+        /*
+         * Сбрасываем флаг автозапуска.
+         *
+         * Пауза означает, что пользователь остановил воспроизведение
+         * осознанно. Если флаг остался true, любой последующий `canplay`
+         * или `onReady` снова запустил бы трек — именно это давало
+         * «самовключение через пару секунд после паузы».
+         */
+        shouldAutoPlayRef.current = false;
       },
       onEnded: () => {
         // Обработка окончания общая для обоих источников.
@@ -559,6 +594,21 @@ export function BottomPlayer({
       const el = audioRef.current;
       if (!el) return;
 
+      /*
+       * Пользователь поставил паузу — сторож не вмешивается.
+       *
+       * ЭТО ГЛАВНАЯ ПРИЧИНА САМОВКЛЮЧЕНИЯ ПОСЛЕ ПАУЗЫ.
+       *
+       * Сторож не различал «трек не загрузился» и «трек осознанно
+       * остановлен»: в обоих случаях он видел `paused === true` и через
+       * 12 секунд сам вызывал `startPlayback()`. Человек ставил паузу,
+       * отходил — и музыка внезапно играла снова.
+       *
+       * Проверяем намерение, а не состояние: если автозапуск не запрашивали
+       * (флаг сброшен паузой), значит остановка сознательная.
+       */
+      if (!shouldAutoPlayRef.current) return;
+
       // Воспроизведение уже пошло — сторож не нужен.
       if (!el.paused && el.currentTime > 0) return;
 
@@ -570,7 +620,6 @@ export function BottomPlayer({
           `[player] трек не начал играть, попытка ${recoveryAttemptsRef.current}`,
         );
 
-        shouldAutoPlayRef.current = true;
         el.load();
 
         // Даём ещё один шанс на повторной загрузке.

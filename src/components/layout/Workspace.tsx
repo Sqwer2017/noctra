@@ -25,6 +25,7 @@ import { getWindowMeta } from "../../data/windowRegistry";
 import type { WindowId } from "../../types/windows";
 import { DesktopWindow } from "../windows/DesktopWindow";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type { Playlist, PlaylistPrivacy, PlaylistTrack } from "../../types/playlist";
 import { LayoutGroup, motion } from "motion/react";
 import { VirtualTrackList } from "../tracks/VirtualTrackList";
@@ -60,6 +61,16 @@ type WorkspaceProps = {
   onOpenPlaylistDetails: (playlistId: string) => void;
   onRemoveTrackFromPlaylist: (playlistId: string, trackId: string) => void;
   onPlayTrack: (track: PlaylistTrack, queue?: PlaylistTrack[]) => void;
+  /**
+   * Режим одного окна.
+   *
+   * На маленьких экранах (телефоны, планшеты, мониторы меньше ~22") показывается
+   * только активное окно на весь контейнер, а остальные ждут в стеке. Между ними
+   * можно листать свайпом — как домашние экраны на телефоне. Открыто может быть
+   * до 4 окон, как и на десктопе: стек не ограничен одним, ограничен только
+   * видимый слой.
+   */
+  singleWindow?: boolean;
 };
 
 export function Workspace({
@@ -81,6 +92,7 @@ export function Workspace({
   onUpdatePlaylist,
   onPlayTrack,
   onDeletePlaylist,
+  singleWindow = false,
 }: WorkspaceProps) {
   const { t } = useT();
 
@@ -97,6 +109,49 @@ export function Workspace({
 
   if (openedWindows.length === 0) {
     return <EmptyWorkspace />;
+  }
+
+  /*
+   * Режим одного окна.
+   *
+   * Показываем только активное окно на весь контейнер. Остальные открыты
+   * и живут в стеке — между ними можно листать свайпом влево/вправо, как
+   * домашние экраны на телефоне. Если активного окна нет (все закрыты —
+   * этот случай уже обработан выше, но activeWindow может отставать),
+   * показываем последнее открытое.
+   */
+  if (singleWindow) {
+    return (
+      <SingleWindowCarousel
+        openedWindows={openedWindows}
+        closingWindows={closingWindows}
+        activeWindow={activeWindow ?? openedWindows[openedWindows.length - 1]}
+        setActiveWindow={setActiveWindow}
+        closeWindow={closeWindow}
+        favoriteCount={favoriteTracks.length}
+        content={(windowId) =>
+          renderWindowContent(windowId, {
+            playlists,
+            selectedPlaylistId,
+            favoriteTracks,
+            onCreatePlaylist,
+            onUpdatePlaylist,
+            onDeletePlaylist,
+            onAddTrackToPlaylist,
+            onOpenPlaylistDetails,
+            onRemoveTrackFromPlaylist,
+            onToggleFavoriteTrack,
+            onRemoveFavoriteTrack,
+            onPlayTrack,
+            onOpenWindow,
+            currentTrackId,
+            isPlaying,
+            onQueueTrack: pushToQueue,
+            onToggleActiveTrack: toggleActiveTrack,
+          })
+        }
+      />
+    );
   }
 
   return (
@@ -150,6 +205,10 @@ export function Workspace({
                 isClosing={closingWindows.includes(windowId)}
                 onFocus={() => setActiveWindow(windowId)}
                 onClose={() => closeWindow(windowId)}
+                // Счёт в заголовке вместо отдельного блока внутри окна.
+                count={
+                  windowId === "favorites" ? favoriteTracks.length : undefined
+                }
               >
                 {renderWindowContent(windowId, {
                   playlists,
@@ -193,6 +252,174 @@ function getWorkspaceGridClass(count: number) {
   }
 
   return "grid-cols-2 grid-rows-2";
+}
+
+/**
+ * Карусель одного окна для маленьких экранов.
+ *
+ * Видно только активное окно — на весь контейнер. Остальные открыты и ждут
+ * в стеке сзади: листать между ними можно свайпом влево/вправо, как домашние
+ * экраны на телефоне. Стек не ограничен одним окном — ограничен только
+ * видимый слой, открыто может быть до 4 окон, как на десктопе.
+ *
+ * Реализация — drag у framer-motion на контейнере активного окна:
+ * жест распознаётся по смещению ИЛИ скорости, иначе окно пружиной
+ * возвращается на место. Вертикальный скролл внутри окна не конфликтует:
+ * drag идёт строго по горизонтали (`drag="x"`), а контент скроллится
+ * по вертикали.
+ */
+
+/** Насколько нужно потянуть, чтобы окно переключилось. */
+const WINDOW_SWIPE_OFFSET_PX = 80;
+
+/** Скорость свайпа, при которой переключаем даже без большого смещения. */
+const WINDOW_SWIPE_VELOCITY = 400;
+
+function SingleWindowCarousel({
+  openedWindows,
+  closingWindows,
+  activeWindow,
+  setActiveWindow,
+  closeWindow,
+  favoriteCount,
+  content,
+}: {
+  openedWindows: WindowId[];
+  closingWindows: WindowId[];
+  activeWindow: WindowId | null;
+  setActiveWindow: (id: WindowId) => void;
+  closeWindow: (id: WindowId) => void;
+  /** Число избранных — для счёта в заголовке окна. */
+  favoriteCount: number;
+  content: (windowId: WindowId) => ReactNode;
+}) {
+  const { t } = useT();
+
+  /*
+   * Страховка от «пустого экрана».
+   *
+   * `activeWindow` может указывать на окно, которого нет в `openedWindows`:
+   * например, при открытии пятого окна первое выкидывается лимитом, а если
+   * выкинулось активное — каркас остаётся со ссылкой в никуда. Тогда фильтр
+   * ниже не пропускает ни одно окно, и экран пустой (видны только точки
+   * и плеер), хотя окна открыты.
+   *
+   * Лечим на месте: если активного нет в списке, показываем последнее
+   * открытое. Состояние чиним тоже — иначе рассинхрон вернётся при
+   * следующем рендере.
+   */
+  const safeActiveWindow = openedWindows.includes(activeWindow as WindowId)
+    ? activeWindow
+    : (openedWindows[openedWindows.length - 1] ?? null);
+
+  const activeIndex = Math.max(
+    0,
+    safeActiveWindow ? openedWindows.indexOf(safeActiveWindow) : 0,
+  );
+
+  /** Переключение на соседнее окно в стеке (с зацикливанием). */
+  const stepWindow = (direction: 1 | -1) => {
+    if (openedWindows.length < 2) return;
+
+    const next =
+      (activeIndex + direction + openedWindows.length) % openedWindows.length;
+
+    setActiveWindow(openedWindows[next]);
+  };
+
+  return (
+    <div className="relative h-full min-h-0 w-full overflow-hidden">
+      <motion.div
+        key={safeActiveWindow ?? "empty"}
+        drag="x"
+        dragConstraints={{ left: 0, right: 0 }}
+        dragElastic={0.35}
+        onDragEnd={(_, info) => {
+          if (
+            info.offset.x < -WINDOW_SWIPE_OFFSET_PX ||
+            info.velocity.x < -WINDOW_SWIPE_VELOCITY
+          ) {
+            // Свайп влево — следующее окно.
+            stepWindow(1);
+          } else if (
+            info.offset.x > WINDOW_SWIPE_OFFSET_PX ||
+            info.velocity.x > WINDOW_SWIPE_VELOCITY
+          ) {
+            // Свайп вправо — предыдущее окно.
+            stepWindow(-1);
+          }
+        }}
+        /*
+         * Появление нового окна — лёгкий сдвиг со стороны, откуда пришли.
+         * Направление отслеживать сложно (зависит от жеста), поэтому всегда
+         * едем слева направо: это нейтрально и не дезориентирует.
+         */
+        initial={{ opacity: 0, x: 32 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ type: "spring", stiffness: 320, damping: 30 }}
+        className="h-full min-h-0 w-full touch-pan-y"
+      >
+        {openedWindows.map((windowId) => {
+          // Рендерим только активное: остальные в стеке не тратят ресурсы
+          // на свои списки и виртуализацию, пока их не открыли.
+          if (windowId !== safeActiveWindow) return null;
+
+          const meta = getWindowMeta(windowId);
+          if (!meta) return null;
+
+          return (
+            <div key={windowId} className="h-full min-h-0 w-full">
+              <DesktopWindow
+                title={t(WINDOW_TITLE_KEYS[windowId])}
+                subtitle={t(WINDOW_SUBTITLE_KEYS[windowId])}
+                icon={meta.icon}
+                isActive
+                isClosing={closingWindows.includes(windowId)}
+                onFocus={() => setActiveWindow(windowId)}
+                onClose={() => closeWindow(windowId)}
+                count={
+                  windowId === "favorites" ? favoriteCount : undefined
+                }
+              >
+                {content(windowId)}
+              </DesktopWindow>
+            </div>
+          );
+        })}
+      </motion.div>
+
+      {/*
+        Точки-индикаторы стека.
+        
+        Показывают, сколько окон открыто и какое активно — иначе непонятно,
+        что свайп вообще что-то делает. При одном окне не рисуем: индикатор
+        из одной точки — визуальный мусор.
+      */}
+      {openedWindows.length > 1 && (
+        <div className="pointer-events-none absolute bottom-2 left-1/2 flex -translate-x-1/2 gap-1.5">
+          {openedWindows.map((windowId, index) => (
+            <button
+              key={windowId}
+              type="button"
+              tabIndex={-1}
+              aria-hidden="true"
+              onClick={() => setActiveWindow(openedWindows[index])}
+              className={`pointer-events-auto h-1.5 rounded-full transition-all ${
+                index === activeIndex
+                  ? "w-5 bg-purple-300"
+                  : "w-1.5 bg-white/25 hover:bg-white/40"
+              }`}
+              style={
+                index === activeIndex
+                  ? { boxShadow: "0 0 8px var(--accent-glow)" }
+                  : undefined
+              }
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 type WindowContentContext = {
@@ -377,18 +604,16 @@ function FavoritesWindowContent({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4">
-      <div className="rounded-3xl border border-purple-300/15 bg-purple-500/10 p-4">
-        <p className="text-sm font-semibold text-white">
-          {t("workspace.favorites.title")}
-        </p>
-        <p className="mt-1 text-xs text-purple-100/45">
-          {t("workspace.favorites.saved", { count: favoriteTracks.length })}
-        </p>
-      </div>
-
-      <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-purple-100/45 transition focus-within:border-purple-300/35">
-        <Search size={16} />
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      {/*
+        Подблока со счётчиком здесь больше нет.
+        
+        Раньше был отдельный блок «Избранные треки / N сохранённых» — он
+        занимал место, а информацию дублировал. Теперь счёт живёт в заголовке
+        окна (DesktopWindow показывает «Избранное · 38»), а здесь сразу поиск.
+      */}
+      <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-4 py-2 text-sm text-purple-100/45 transition focus-within:border-purple-300/35">
+        <Search size={15} />
 
         <input
           value={searchQuery}
@@ -517,7 +742,6 @@ function MusicSearchWindowContent({
   const [isAddMenuClosing, setIsAddMenuClosing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [tracks, setTracks] = useState<PlaylistTrack[]>(fallbackTracks);
-  const [isLoadingTelegram, setIsLoadingTelegram] = useState(false);
   const [telegramError, setTelegramError] = useState<string | null>(null);
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
 
@@ -589,9 +813,16 @@ function MusicSearchWindowContent({
     }
   }
 
+  /*
+   * Тихая загрузка треков при открытии.
+   *
+   * Кнопок загрузки в окне больше нет (переехали в настройки), но треки
+   * должны подтягиваться сами — иначе окно встречало бы пустым списком.
+   * Состояния загрузки здесь нет: спиннер негде показывать, а ошибка
+   * видна по статусу сервера под полем поиска.
+   */
   async function loadTelegramTracks(sync = false) {
     try {
-      setIsLoadingTelegram(true);
       setTelegramError(null);
 
       const loadedTracks = sync
@@ -605,8 +836,6 @@ function MusicSearchWindowContent({
       setTelegramError(
         error instanceof Error ? error.message : t("workspace.telegram.error"),
       );
-    } finally {
-      setIsLoadingTelegram(false);
     }
   }
 
@@ -677,7 +906,7 @@ function MusicSearchWindowContent({
   return (
     <div className="flex h-full flex-col gap-4">
       {/* Табы источника */}
-      <div className="grid grid-cols-3 rounded-2xl border border-white/10 bg-black/25 p-1">
+      <div className="grid grid-cols-3 rounded-full border border-white/10 bg-black/25 p-1">
         {([
           { id: "telegram", label: "Telegram", accent: false },
           { id: "audius", label: "Audius", accent: false },
@@ -686,11 +915,11 @@ function MusicSearchWindowContent({
           <button
             key={item.id}
             onClick={() => setSource(item.id)}
-            className={`flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-sm transition ${
+            className={`flex items-center justify-center gap-1.5 rounded-full px-3 py-2 text-sm transition ${
               source === item.id
                 ? item.accent
                   ? // Фирменный красный YouTube: активная вкладка узнаётся сразу.
-                    "bg-red-600/25 text-white shadow-[0_0_18px_-6px_rgba(255,0,0,0.8)]"
+                    "bg-red-600/25 text-white shadow-[0_0_16px_rgba(255,0,0,0.35)]"
                   : "bg-purple-500/25 text-white"
                 : "text-purple-100/45 hover:text-white"
             }`}
@@ -717,8 +946,8 @@ function MusicSearchWindowContent({
 
       {source === "telegram" ? (
         <>
-          <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-purple-100/45 transition focus-within:border-purple-300/35">
-            <Search size={16} />
+          <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-4 py-2 text-sm text-purple-100/45 transition focus-within:border-purple-300/35">
+            <Search size={15} />
 
             <input
               value={searchQuery}
@@ -733,34 +962,22 @@ function MusicSearchWindowContent({
                 className="inline-flex aspect-square items-center justify-center rounded-full p-1 leading-none text-purple-100/35 transition hover:bg-white/10 hover:text-white"
                 title={t("workspace.search.clear")}
               >
-                <X size={14} className="m-0 block" />
+                <X size={13} className="m-0 block" />
               </button>
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => loadTelegramTracks(false)}
-              disabled={isLoadingTelegram}
-              className="rounded-2xl border border-purple-300/20 bg-purple-500/15 px-4 py-3 text-sm text-purple-50 transition hover:bg-purple-500/25 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {isLoadingTelegram
-                ? t("workspace.telegram.loading")
-                : t("workspace.telegram.load")}
-            </button>
-
-            <button
-              onClick={() => loadTelegramTracks(true)}
-              disabled={isLoadingTelegram}
-              className="rounded-2xl border border-sky-300/20 bg-sky-500/10 px-4 py-3 text-sm text-sky-50 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {t("workspace.telegram.sync")}
-            </button>
-          </div>
+          {/*
+            Кнопки синхронизации переехали в Настройки.
+            
+            Они нужны раз в день, а не при каждом поиске, и занимали треть
+            окна. Здесь осталась только строка поиска — окно стало компактным.
+            Сами кнопки живут в SettingsWindowContent (секция Telegram).
+          */}
         </>
       ) : source === "audius" ? (
         <>
-          <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-purple-100/45 transition focus-within:border-purple-300/35">
+          <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-4 py-2.5 text-sm text-purple-100/45 transition focus-within:border-purple-300/35">
             <Search size={16} />
 
             <input
@@ -791,7 +1008,7 @@ function MusicSearchWindowContent({
           <button
             onClick={() => void runAudiusSearch()}
             disabled={isLoadingAudius || !audiusQuery.trim()}
-            className="rounded-2xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-50 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-full border border-emerald-300/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-50 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {isLoadingAudius
               ? t("workspace.telegram.loading")
@@ -802,7 +1019,7 @@ function MusicSearchWindowContent({
 
       {source === "youtube" && (
         <>
-          <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-purple-100/45 transition focus-within:border-red-400/40">
+          <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-4 py-2.5 text-sm text-purple-100/45 transition focus-within:border-red-400/40">
             <Search size={16} />
 
             <input
@@ -833,7 +1050,7 @@ function MusicSearchWindowContent({
           <button
             onClick={() => void runYoutubeSearch()}
             disabled={isLoadingYoutube || !youtubeQuery.trim()}
-            className="rounded-2xl border border-red-400/25 bg-red-600/15 px-4 py-3 text-sm text-red-50 transition hover:bg-red-600/25 disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-full border border-red-400/25 bg-red-600/15 px-4 py-3 text-sm text-red-50 transition hover:bg-red-600/25 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {isLoadingYoutube
               ? t("workspace.telegram.loading")
@@ -1093,7 +1310,7 @@ function PlaylistsWindowContent({
 
   return (
     <div className="flex h-full flex-col gap-3">
-      <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-purple-100/45 transition focus-within:border-purple-300/35">
+      <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-4 py-2.5 text-sm text-purple-100/45 transition focus-within:border-purple-300/35">
         <Search size={16} />
 
         <input
@@ -1579,19 +1796,31 @@ function CreatePlaylistWindowContent({
   }
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-[280px_1fr] gap-4">
-      <div className="space-y-4">
-        <div className="h-64 overflow-hidden rounded-3xl border border-purple-300/15 bg-gradient-to-br from-purple-500/35 to-black shadow-xl shadow-purple-950/25">
-          {cover ? (
-            <img src={cover} alt="" className="h-full w-full object-cover" />
-          ) : (
-            <div className="flex h-full items-center justify-center p-6 text-center text-sm leading-6 text-purple-100/45">
-              {t("workspace.create.coverPreview")}
-            </div>
-          )}
-        </div>
+    /*
+     * Вертикальная компоновка вместо двух колонок.
+     *
+     * Было `grid-cols-[280px_1fr]`: на телефоне 280px обложки съедали весь
+     * экран, а форма уезжала вниз за скролл. Теперь всё в одну колонку:
+     * сверху компактная обложка-горизонт (h-32, а не квадрат 256px),
+     * дальше поля друг под другом. На десктопе тоже стало лучше — окно
+     * создания обычно узкое, и две колонки в нём теснились.
+     *
+     * Углы — пилюли и сильные скругления: поле ввода и кнопка загрузки
+     * круглые, превью и приватность с мягкими углами, финальная панель
+     * с максимальным скруглением.
+     */
+    <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto pr-0.5 noctra-scrollbar">
+      {/* Обложка-горизонт */}
+      <div className="relative h-32 shrink-0 overflow-hidden rounded-[24px] border border-purple-300/15 bg-gradient-to-br from-purple-500/35 to-black shadow-xl shadow-purple-950/25">
+        {cover ? (
+          <img src={cover} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full items-center justify-center p-4 text-center text-xs leading-5 text-purple-100/45">
+            {t("workspace.create.coverPreview")}
+          </div>
+        )}
 
-        <label className="flex cursor-pointer items-center justify-center rounded-2xl border border-purple-300/20 bg-purple-500/15 px-4 py-3 text-sm text-purple-50 transition hover:bg-purple-500/25">
+        <label className="absolute bottom-2 right-2 flex cursor-pointer items-center gap-1.5 rounded-full border border-white/15 bg-black/60 px-3 py-1.5 text-[11px] font-semibold text-white backdrop-blur transition hover:bg-black/80">
           {t("workspace.create.uploadCover")}
           <input
             type="file"
@@ -1602,75 +1831,73 @@ function CreatePlaylistWindowContent({
         </label>
       </div>
 
-      <div className="flex min-h-0 flex-col gap-4">
-        <div>
-          <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-purple-100/40">
-            {t("workspace.create.labelName")}
-          </label>
+      <div>
+        <label className="mb-1.5 block text-[11px] uppercase tracking-[0.18em] text-purple-100/40">
+          {t("workspace.create.labelName")}
+        </label>
 
-          <input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="Dark Sovereigns"
-            className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none placeholder:text-purple-100/30 focus:border-purple-300/40"
-          />
+        <input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="Dark Sovereigns"
+          className="w-full rounded-full border border-white/10 bg-black/30 px-4 py-2.5 text-sm outline-none placeholder:text-purple-100/30 focus:border-purple-300/40"
+        />
+      </div>
+
+      <div>
+        <label className="mb-1.5 block text-[11px] uppercase tracking-[0.18em] text-purple-100/40">
+          {t("workspace.create.labelDesc")}
+        </label>
+
+        <textarea
+          value={description}
+          onChange={(event) => setDescription(event.target.value)}
+          placeholder={t("workspace.create.labelDescPlaceholder")}
+          className="h-20 w-full resize-none rounded-[20px] border border-white/10 bg-black/30 px-4 py-2.5 text-sm leading-6 outline-none placeholder:text-purple-100/30 focus:border-purple-300/40"
+        />
+      </div>
+
+      <div>
+        <label className="mb-1.5 block text-[11px] uppercase tracking-[0.18em] text-purple-100/40">
+          {t("workspace.create.labelPrivacy")}
+        </label>
+
+        <div className="grid grid-cols-3 gap-2">
+          {(["Public", "Friends", "Private"] as PlaylistPrivacy[]).map(
+            (item) => (
+              <button
+                key={item}
+                onClick={() => setPrivacy(item)}
+                className={`rounded-full border px-2 py-2.5 text-xs font-semibold transition ${
+                  privacy === item
+                    ? "border-purple-300/35 bg-purple-500/25 text-white"
+                    : "border-white/10 bg-white/[0.04] text-purple-100/55 hover:bg-white/[0.07]"
+                }`}
+              >
+                {t(`workspace.create.privacy.${item}`)}
+              </button>
+            ),
+          )}
+        </div>
+      </div>
+
+      <div className="mt-auto flex items-center justify-between gap-3 rounded-[24px] border border-white/10 bg-white/[0.04] p-3">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-white">
+            {t("workspace.create.ready")}
+          </p>
+          <p className="mt-0.5 truncate text-[11px] text-purple-100/45">
+            {t("workspace.create.ready.body")}
+          </p>
         </div>
 
-        <div>
-          <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-purple-100/40">
-            {t("workspace.create.labelDesc")}
-          </label>
-
-          <textarea
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            placeholder={t("workspace.create.labelDescPlaceholder")}
-            className="h-32 w-full resize-none rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm leading-6 outline-none placeholder:text-purple-100/30 focus:border-purple-300/40"
-          />
-        </div>
-
-        <div>
-          <label className="mb-2 block text-xs uppercase tracking-[0.18em] text-purple-100/40">
-            {t("workspace.create.labelPrivacy")}
-          </label>
-
-          <div className="grid grid-cols-3 gap-2">
-            {(["Public", "Friends", "Private"] as PlaylistPrivacy[]).map(
-              (item) => (
-                <button
-                  key={item}
-                  onClick={() => setPrivacy(item)}
-                  className={`rounded-2xl border px-4 py-3 text-sm transition ${
-                    privacy === item
-                      ? "border-purple-300/35 bg-purple-500/25 text-white"
-                      : "border-white/10 bg-white/[0.04] text-purple-100/55 hover:bg-white/[0.07]"
-                  }`}
-                >
-                  {t(`workspace.create.privacy.${item}`)}
-                </button>
-              ),
-            )}
-          </div>
-        </div>
-
-        <div className="mt-auto flex items-center justify-between gap-3 rounded-3xl border border-white/10 bg-white/[0.04] p-4">
-          <div>
-            <p className="text-sm font-semibold text-white">
-              {t("workspace.create.ready")}
-            </p>
-            <p className="mt-1 text-xs text-purple-100/45">
-              {t("workspace.create.ready.body")}
-            </p>
-          </div>
-
-          <button
-            onClick={handleCreate}
-            disabled={!name.trim()}
-            className="rounded-2xl border border-purple-300/25 bg-purple-500/20 px-5 py-3 text-sm font-semibold text-white transition hover:bg-purple-500/30 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {t("workspace.createPlaylist")}
-          </button>
-        </div>
+        <button
+          onClick={handleCreate}
+          disabled={!name.trim()}
+          className="shrink-0 rounded-full border border-purple-300/25 bg-purple-500/20 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-purple-500/30 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {t("workspace.createPlaylist")}
+        </button>
       </div>
     </div>
   );
@@ -1686,7 +1913,7 @@ function FriendsWindowContent() {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-purple-100/45">
+      <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/25 px-4 py-2.5 text-sm text-purple-100/45">
         <Search size={16} />
         {t("workspace.friends.search")}
       </div>
@@ -1955,6 +2182,32 @@ function SettingsWindowContent() {
   const setLanguagePreference = useAppStore((s) => s.setLanguagePreference);
   const profile = useAppStore((s) => s.profile);
 
+  /*
+   * Синхронизация Telegram.
+   *
+   * Кнопки переехали сюда из окна поиска: они нужны раз в день, а не при
+   * каждом поиске, и занимали треть окна. Состояние локальное — результат
+   * синхронизации виден сразу в окне поиска при следующем открытии.
+   */
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+
+  async function runTelegramSync(sync: boolean) {
+    setIsSyncing(true);
+    setSyncMessage(null);
+
+    try {
+      const tracks = sync ? await syncTelegramTracks() : await getTelegramTracks();
+      setSyncMessage(
+        t("settings.telegram.synced", { count: tracks.length }),
+      );
+    } catch {
+      setSyncMessage(t("settings.telegram.syncError"));
+    } finally {
+      setIsSyncing(false);
+    }
+  }
+
   const sourceItems: { key: string; label: string; icon: React.ReactNode }[] = [
     { key: "SoundCloud", label: t("settings.soundcloud"), icon: <Music size={16} /> },
     { key: "Audius", label: t("settings.audius"), icon: <Heart size={16} /> },
@@ -2025,19 +2278,58 @@ function SettingsWindowContent() {
               key={source.key}
               className="rounded-2xl border border-white/10 bg-white/[0.04] p-4"
             >
+              {/*
+                Бейджа «заглушка» здесь больше нет: все четыре источника
+                работают по-настоящему — Telegram через свой бэкенд,
+                Audius и YouTube через открытые API. Метка осталась бы
+                с времён, когда это были заглушки в интерфейсе.
+              */}
               <div className="flex items-center gap-2">
                 <span className="flex h-7 w-7 items-center justify-center rounded-xl border border-purple-300/15 bg-purple-500/10">
                   {source.icon}
                 </span>
                 <p className="text-sm font-semibold">{source.label}</p>
-                <span className="ml-auto rounded-full border border-white/10 bg-black/25 px-2 py-1 text-[10px] text-purple-100/35">
-                  {t("workspace.telegram.mock")}
+                <span className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-emerald-200/80">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                  {t("settings.active")}
                 </span>
               </div>
 
               <p className="mt-2 text-xs leading-5 text-purple-100/45">
-                {t("settings.notConnected")}
+                {t(`settings.source.${source.key.toLowerCase()}`)}
               </p>
+
+              {/*
+                Синхронизация Telegram — только в его карточке.
+                
+                Две компактные кнопки в ряд: загрузка и синхронизация.
+                Раньше они занимали треть окна поиска, хотя нужны раз в день.
+              */}
+              {source.key === "Telegram" && (
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => void runTelegramSync(false)}
+                    disabled={isSyncing}
+                    className="rounded-full border border-purple-300/20 bg-purple-500/15 px-3 py-2 text-xs font-semibold text-purple-50 transition hover:bg-purple-500/25 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {isSyncing
+                      ? t("workspace.telegram.loading")
+                      : t("workspace.telegram.load")}
+                  </button>
+                  <button
+                    onClick={() => void runTelegramSync(true)}
+                    disabled={isSyncing}
+                    className="rounded-full border border-sky-300/20 bg-sky-500/10 px-3 py-2 text-xs font-semibold text-sky-50 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {t("workspace.telegram.sync")}
+                  </button>
+                  {syncMessage && (
+                    <p className="col-span-2 text-center text-[11px] text-purple-100/50">
+                      {syncMessage}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>

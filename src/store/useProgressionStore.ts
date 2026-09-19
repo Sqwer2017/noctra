@@ -421,9 +421,52 @@ async function persistQuestProgress(id: QuestId): Promise<void> {
   await pushQuestProgress(id, state.daily.date, state.getQuestProgress(id));
 }
 
-/** Синхронизирует прогресс квеста по его текущему значению. */
-async function syncQuestProgress(id: QuestId): Promise<void> {
-  await persistQuestProgress(id);
+/*
+ * Троттлинг записи прогресса заданий.
+ *
+ * Прогресс «Погружения» обновляется на каждом тике прослушивания, то есть
+ * раз в секунду. Без ограничения это был бы отдельный RPC-запрос в секунду
+ * на пользователя — при сотне слушателей база получила бы шесть тысяч
+ * запросов в минуту только на этот квест. Поэтому склеиваем вызовы:
+ * не чаще одного раза в QUEST_SYNC_INTERVAL_MS.
+ */
+const QUEST_SYNC_INTERVAL_MS = 10_000;
+
+const pendingQuestSync = new Map<QuestId, ReturnType<typeof setTimeout>>();
+
+/** Синхронизирует прогресс квеста по его текущему значению (с троттлингом). */
+function syncQuestProgress(id: QuestId): void {
+  if (pendingQuestSync.has(id)) return;
+
+  void persistQuestProgress(id);
+
+  pendingQuestSync.set(
+    id,
+    setTimeout(() => {
+      pendingQuestSync.delete(id);
+    }, QUEST_SYNC_INTERVAL_MS),
+  );
+}
+
+/**
+ * Принудительно отправляет прогресс квеста, минуя троттлинг.
+ *
+ * Нужен в момент, когда значение становится решающим: переход через цель
+ * квеста. Без этого в базе могло лежать 29 из 30 — троттлинг задержал
+ * последнюю запись, а человек уже жмёт «Забрать награду». Сервер проверяет
+ * таблицу, а не локальное состояние, и отвечает `not_completed`, хотя
+ * условие честно выполнено.
+ *
+ * Вызывается редко (один раз на квест в день), поэтому на нагрузку не влияет.
+ */
+function flushQuestProgress(id: QuestId): void {
+  const pending = pendingQuestSync.get(id);
+  if (pending) {
+    clearTimeout(pending);
+    pendingQuestSync.delete(id);
+  }
+
+  void persistQuestProgress(id);
 }
 
 export const useProgressionStore = create<ProgressionState>()(
@@ -515,6 +558,44 @@ export const useProgressionStore = create<ProgressionState>()(
           },
           daily: { ...state.daily, listenedSeconds: nextDaySeconds },
         });
+
+        /*
+         * Прогресс «Погружения» уходит в базу на каждом тике.
+         *
+         * Раньше здесь этого вызова не было — в отличие от «Коллекционера»
+         * и «Ночного марафона», у которых свои точки синхронизации. Прогресс
+         * копился только локально в `daily.listenedSeconds` и попадал в базу
+         * лишь при backfill'е после входа.
+         *
+         * Итог: человек слушал полчаса, интерфейс показывал выполненный квест,
+         * но `claim_quest` проверяет таблицу, а не локальное состояние, —
+         * строки там не было, и сервер отвечал `no_progress`. Награду
+         * забрать было нельзя, хотя условие честно выполнено.
+         *
+         * Вызов троттлится внутри: тик приходит раз в секунду, а запись
+         * уходит не чаще раза в 10 секунд, так что нагрузки на базу
+         * это не создаёт.
+         *
+         * Отдельно: при переходе через цель пишем немедленно, минуя
+         * троттлинг. Иначе в базе могло лежать 29 из 30 — троттлинг задержал
+         * последнюю запись, а человек уже жмёт «Забрать награду», и сервер
+         * отвечает `not_completed`.
+         */
+        {
+          const quest = QUESTS.find((q) => q.id === "immersion");
+          const prevMinutes = Math.floor(prevDaySeconds / 60);
+          const nextMinutes = Math.floor(nextDaySeconds / 60);
+
+          if (
+            quest &&
+            prevMinutes < quest.target &&
+            nextMinutes >= quest.target
+          ) {
+            flushQuestProgress("immersion");
+          } else {
+            syncQuestProgress("immersion");
+          }
+        }
 
         scheduleCloudSync();
       },
@@ -981,7 +1062,10 @@ export const useProgressionStore = create<ProgressionState>()(
         const known = new Set(quests.map((row) => row.quest_id));
         for (const quest of QUESTS) {
           if (known.has(quest.id)) continue;
-          await syncQuestProgress(quest.id);
+          // Здесь нужен именно прямой вызов без троттлинга: backfill
+          // выполняется один раз за сессию, и ждать окно троттлинга нельзя —
+          // иначе прогресс не дойдёт до базы до первой попытки забрать награду.
+          await persistQuestProgress(quest.id);
         }
 
         // Данные прочитаны — с этого момента писать в облако безопасно.

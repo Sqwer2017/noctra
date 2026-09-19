@@ -64,18 +64,28 @@ export function Sidebar({
   }
 
   return (
-    <aside className="relative flex min-h-0 flex-col rounded-[28px] border border-purple-300/15 bg-black/50 p-4 shadow-2xl shadow-purple-950/40 backdrop-blur-2xl transition-all duration-500 ease-out">
+    /*
+     * Панель с фоном и рамкой.
+     *
+     * Фон возвращён: без него кнопки меню «плавали» на общем фоне приложения,
+     * и рядом с другими блоками (окна, плеер, карточки) возникал визуальный
+     * разнобой — те имеют подложку, а меню нет. Теперь оформление единое.
+     *
+     * Отступы внутренние (p-3 вместо прежнего p-4): панель стала компактнее,
+     * но фон, рамка и скругление на месте.
+     */
+    <aside className="relative flex min-h-0 flex-col overflow-visible rounded-[28px] border border-purple-300/15 bg-black/50 p-3 shadow-2xl shadow-purple-950/40 backdrop-blur-2xl transition-all duration-500 ease-out">
       {!isCollapsed && (
         <button
           onClick={onToggleCollapse}
-          className="absolute right-3 top-3 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-purple-300/20 bg-black/70 text-purple-100 shadow-lg shadow-purple-950/40 transition hover:bg-purple-500/20"
+          className="absolute right-2 top-2 z-20 flex h-7 w-7 items-center justify-center rounded-full border border-purple-300/20 bg-black/70 text-purple-100 shadow-lg shadow-purple-950/40 transition hover:bg-purple-500/20"
           title={t("sidebar.collapse")}
         >
-          <ChevronLeft size={16} />
+          <ChevronLeft size={15} />
         </button>
       )}
 
-      <div className="border-b border-white/10 pb-5">
+      <div className="pb-3">
         <button
           onClick={() => {
             if (isCollapsed) {
@@ -93,7 +103,7 @@ export function Sidebar({
             src={logo}
             alt="Noctra"
             className={`object-contain drop-shadow-[0_0_24px_rgba(168,85,247,0.35)] transition-all duration-500 ease-out ${
-              isCollapsed ? "h-[4.8rem] max-w-[84px]" : "h-[8.4rem] max-w-[264px]"
+              isCollapsed ? "h-[3.6rem] max-w-[60px]" : "h-[7.2rem] max-w-[228px]"
             }`}
           />
         </button>
@@ -104,12 +114,12 @@ export function Sidebar({
           </p>
         )}
 
-        {/* В свёрнутом виде — крупный мини-аватар для быстрого доступа к профилю */}
+        {/* В свёрнутом виде — мини-аватар для быстрого доступа к профилю */}
         {isCollapsed && profile && (
           <button
             onClick={onOpenDashboard}
             title={t("dash.open")}
-            className={`mx-auto mt-4 flex h-12 w-12 cursor-pointer items-center justify-center overflow-hidden rounded-full ring-2 transition-all hover:scale-105 hover:ring-[var(--accent)] ${
+            className={`mx-auto mt-3 flex h-11 w-11 cursor-pointer items-center justify-center overflow-hidden rounded-full ring-2 transition-all hover:scale-105 hover:ring-[var(--accent)] ${
               isDashboardOpen ? "ring-[var(--accent)]" : "ring-white/10"
             }`}
           >
@@ -196,8 +206,8 @@ export function Sidebar({
         </button>
       )}
 
-      <nav className="mt-5 min-h-0 flex-1 overflow-auto pr-1 noctra-scrollbar">
-        <div className="space-y-2">
+      <nav className="mt-4 min-h-0 flex-1 overflow-y-auto overflow-x-hidden noctra-scrollbar">
+        <div className={isCollapsed ? "space-y-2" : "space-y-2"}>
           {Object.entries(groupedWindows).map(([rawCategory, windows]) => {
             const category = rawCategory as WindowCategory;
             const isCategoryOpen =
@@ -239,13 +249,34 @@ export function Sidebar({
                             key={window.id}
                             onClick={() => onOpenWindow(window.id)}
                             title={localizedTitle}
-                            className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-sm transition ${
+                            aria-label={localizedTitle}
+                            /*
+                             * В свёрнутом виде — круглая кнопка 40×40.
+                             *
+                             * Раньше здесь был `px-0` при прежнем паддинге:
+                             * кнопка сохраняла внутренние отступы, из-за чего
+                             * иконка не помещалась в узкую колонку и вылезала
+                             * за границы. Теперь в свёрнутом режиме кнопка
+                             * строго квадратная и центрирует иконку, а текст
+                             * и индикатор просто не рендерятся.
+                             */
+                            className={`flex items-center transition ${
+                              isCollapsed
+                                ? "mx-auto h-10 w-10 justify-center rounded-full"
+                                : "w-full gap-3 rounded-2xl px-3 py-2.5 text-left text-sm"
+                            } ${
                               isOpen
                                 ? "border border-purple-300/30 bg-purple-500/20 text-white shadow-lg shadow-purple-950/30"
                                 : "text-purple-100/55 hover:bg-white/8 hover:text-white"
-                            } ${isCollapsed ? "justify-center px-0" : ""}`}
+                            }`}
                           >
-                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-purple-300/10 bg-purple-500/10">
+                            <span
+                              className={`flex shrink-0 items-center justify-center border border-purple-300/10 bg-purple-500/10 ${
+                                isCollapsed
+                                  ? "h-10 w-10 rounded-full"
+                                  : "h-8 w-8 rounded-xl"
+                              }`}
+                            >
                               {window.icon}
                             </span>
 
@@ -290,8 +321,12 @@ export function Sidebar({
 
       <button
         onClick={onLogout}
-        className={`mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-red-300/20 bg-red-500/10 px-4 py-3 text-sm text-red-100/75 transition hover:bg-red-500/20 ${
-          isCollapsed ? "px-0" : ""
+        title={t("sidebar.logout")}
+        aria-label={t("sidebar.logout")}
+        className={`mt-3 flex items-center justify-center border border-red-300/20 bg-red-500/10 text-red-100/75 transition hover:bg-red-500/20 ${
+          isCollapsed
+            ? "mx-auto h-10 w-10 shrink-0 rounded-full"
+            : "w-full gap-2 rounded-2xl px-4 py-3 text-sm"
         }`}
       >
         <LogOut size={16} />

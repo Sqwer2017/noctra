@@ -12,6 +12,13 @@ type DesktopWindowProps = {
   onFocus: () => void;
   onClose: () => void;
   children: ReactNode;
+  /**
+   * Счётчик в заголовке (например, число треков).
+   *
+   * Показывается пилюлей рядом с заголовком. Нужен, чтобы не делать отдельный
+   * блок со статистикой внутри окна — как раньше был «Избранные треки / N».
+   */
+  count?: number;
 };
 
 export function DesktopWindow({
@@ -23,6 +30,7 @@ export function DesktopWindow({
   onFocus,
   onClose,
   children,
+  count,
 }: DesktopWindowProps) {
   const { t } = useT();
 
@@ -50,8 +58,13 @@ export function DesktopWindow({
           </div>
 
           <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold text-white">
-              {title}
+            <h2 className="flex items-center gap-2 truncate text-sm font-semibold text-white">
+              <span className="truncate">{title}</span>
+              {typeof count === "number" && (
+                <span className="shrink-0 rounded-full border border-white/10 bg-white/[0.06] px-2 py-0.5 text-[11px] font-semibold tabular-nums text-purple-100/60">
+                  {count}
+                </span>
+              )}
             </h2>
             <p className="truncate text-[11px] text-purple-100/35">
               {subtitle}

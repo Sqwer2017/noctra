@@ -4,7 +4,6 @@ import { AnimatePresence, motion } from "motion/react";
 import {
   BadgeCheck,
   Headphones,
-  MoreHorizontal,
   Pause,
   Pencil,
   Play,
@@ -22,6 +21,7 @@ import { useProgressionStore, collectActiveDays } from "../../store/useProgressi
 import { useLibraryStore } from "../../store/useLibraryStore";
 import { useT } from "../../i18n/useT";
 import { TrackCover } from "../tracks/TrackCover";
+import { getFrequencyLevels, resumeAnalyser } from "../../audio/analyser";
 import type { PlaylistTrack } from "../../types/playlist";
 import {
   getAchievementProgress,
@@ -42,7 +42,6 @@ import {
 } from "../../lib/statPeriods";
 import type { StatDelta } from "../../lib/statPeriods";
 import { getRankByXp, getRankProgress } from "../../lib/ranks";
-import { getFrequencyLevels, resumeAnalyser } from "../../audio/analyser";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { uploadProfileImage, UploadError } from "../../lib/supabase/storage";
 import { ProfileError } from "../../lib/supabase/profile";
@@ -67,6 +66,15 @@ export function ProfileDashboard({
   const updateProfile = useAppStore((s) => s.updateProfile);
 
   const [isStatsOpen, setIsStatsOpen] = useState(false);
+
+  /*
+   * Открытие редактирования профиля.
+   *
+   * Кнопка живёт отдельно от hero (тонкая, под блоком), а состояние
+   * редактирования — внутри hero. Мостик: hero регистрирует колбэк,
+   * кнопка его вызывает. Ref вместо state, чтобы не вызывать лишний рендер.
+   */
+  const openHeroEditRef = useRef<(() => void) | null>(null);
 
   // Esc — закрыть дашборд (если не открыта модалка статистики).
   useEffect(() => {
@@ -126,6 +134,9 @@ export function ProfileDashboard({
                 coverUrl={coverUrl}
                 status={profile?.status ?? ""}
                 bio={profile?.bio ?? ""}
+                onEditRequest={(open) => {
+                  openHeroEditRef.current = open;
+                }}
                 onSave={(next) => {
                   /*
                    * Тег уникален в базе: если его занял другой человек,
@@ -142,6 +153,10 @@ export function ProfileDashboard({
                     );
                   });
                 }}
+              />
+
+              <ProfileEditButton
+                onEdit={() => openHeroEditRef.current?.()}
               />
 
               <NowPlayingWidget />
@@ -180,6 +195,7 @@ function ProfileHero({
   status,
   bio,
   onSave,
+  onEditRequest,
 }: {
   nick: string;
   handle: string;
@@ -195,12 +211,25 @@ function ProfileHero({
     avatarUrl: string | null;
     coverUrl: string | null;
   }) => void;
+  /**
+   * Запрос на редактирование извне.
+   *
+   * Кнопка «Редактировать» живёт отдельно от hero (тонкая, под блоком),
+   * поэтому ей нужен способ включить режим редактирования. Регистрирует
+   * колбэк при монтировании — дашборд вызывает его по тапу на кнопку.
+   */
+  onEditRequest: (open: () => void) => void;
 }) {
   const { t } = useT();
   const [isEditing, setIsEditing] = useState(false);
 
   const totalXP = useProgressionStore((s) => s.totalXP);
   const rankProgress = getRankProgress(totalXP);
+
+  // Отдаём наружу способ открыть редактирование.
+  useEffect(() => {
+    onEditRequest(() => setIsEditing(true));
+  }, [onEditRequest]);
 
   if (isEditing) {
     return (
@@ -232,20 +261,28 @@ function ProfileHero({
         <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-black/20" />
       </div>
 
-      {/* 2. Верхний слой: кнопки */}
-      <div className="relative z-10 flex justify-end gap-2">
+      {/*
+        2. Верхний слой: кнопка редактирования.
+        
+        На десктопе — полупрозрачная кнопка прямо на блоке, в правом верхнем
+        углу: места там достаточно, и она не отнимает высоту у контента.
+        На телефоне скрыта (`hidden md:flex`) — вместо неё тонкая кнопка
+        под блоком, потому что на баннере она терялась и разъезжалась.
+      */}
+      <div className="relative z-10 hidden justify-end md:flex">
+        {/*
+          Компактная кнопка: уменьшены отступы и иконка.
+          
+          Крупный вариант (px-3.5 py-2 + иконка 13px) перетягивал внимание
+          на себя — на баннере он смотрелся как основное действие, хотя
+          это второстепенная кнопка. Вернули сдержанные размеры.
+        */}
         <button
           onClick={() => setIsEditing(true)}
-          className="flex items-center gap-2 rounded-full border border-white/15 bg-black/50 px-3.5 py-1.5 text-xs font-semibold text-purple-50 backdrop-blur transition hover:bg-white/10"
+          className="flex items-center gap-1.5 rounded-full border border-white/15 bg-black/40 px-2.5 py-1.5 text-[11px] font-semibold text-purple-50 backdrop-blur-md transition hover:bg-white/15"
         >
-          <Pencil size={13} />
+          <Pencil size={11} className="m-0 block shrink-0" />
           {t("profile.edit")}
-        </button>
-        <button
-          className="inline-flex aspect-square items-center justify-center rounded-full border border-white/15 bg-black/50 p-2 text-purple-100/70 backdrop-blur transition hover:bg-white/10 hover:text-white"
-          title="•••"
-        >
-          <MoreHorizontal size={15} className="m-0 block" />
         </button>
       </div>
 
@@ -323,6 +360,29 @@ function ProfileHero({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Тонкая кнопка редактирования профиля — только для телефонов.
+ *
+ * На десктопе кнопка живёт прямо на блоке профиля (см. ProfileHero),
+ * а здесь — вариант для узких экранов: на всю ширину, под hero-блоком.
+ * На баннере она терялась и разъезжалась, поэтому на мобилке вынесена вниз.
+ *
+ * `md:hidden` — показывается только там, где нет места на блоке.
+ */
+function ProfileEditButton({ onEdit }: { onEdit: () => void }) {
+  const { t } = useT();
+
+  return (
+    <button
+      onClick={onEdit}
+      className="flex w-full items-center justify-center gap-2 rounded-full border border-white/10 bg-white/[0.04] py-2 text-xs font-semibold text-purple-100/60 transition hover:bg-white/[0.08] hover:text-white md:hidden"
+    >
+      <Pencil size={13} className="m-0 block shrink-0" />
+      {t("profile.edit")}
+    </button>
   );
 }
 
@@ -740,6 +800,23 @@ function MiniQueueRow({
   );
 }
 
+/**
+ * Звуковая волна в блоке «Сейчас играет».
+ *
+ * Работает в двух режимах, переключаясь автоматически:
+ *
+ *  1. РЕАЛЬНЫЙ СПЕКТР — когда играет трек из Telegram или Audius.
+ *     Web Audio анализатор подключён к `<audio>`-элементу и отдаёт
+ *     настоящие частоты, поэтому волна бьёт под бит.
+ *
+ *  2. ИМИТАЦИЯ — когда сигнала нет: трек из YouTube (звук идёт из IFrame,
+ *     куда Web Audio не дотягивается) или AudioContext ещё не разбужен.
+ *     Рисуем плавный пульсирующий рисунок, чтобы волна не выглядела мёртвой.
+ *
+ * Переключение по НАЛИЧИЮ ЭНЕРГИИ, а не по источнику: молчащий `<audio>`
+ * отдаёт массив нулей, а не null, поэтому проверяем сами значения. Такой
+ * подход не требует знать, какой именно плеер играет.
+ */
 function Waveform({ active }: { active: boolean }) {
   const bars = 48;
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -747,9 +824,12 @@ function Waveform({ active }: { active: boolean }) {
   const levelsRef = useRef<number[]>(Array.from({ length: bars }, () => 0));
   const phaseRef = useRef(0);
 
-  // Держим актуальное значение active без пересоздания rAF-цикла.
+  /** Есть ли реальный сигнал от анализатора (а не тишина/нули). */
+  const hasSignalRef = useRef(false);
+
   useEffect(() => {
     activeRef.current = active;
+    // Разблокируем AudioContext после жеста — иначе он «спит» и даёт нули.
     if (active) void resumeAnalyser();
   }, [active]);
 
@@ -766,18 +846,38 @@ function Waveform({ active }: { active: boolean }) {
 
     const tick = () => {
       const isActive = activeRef.current;
-      const data = isActive ? getFrequencyLevels(bars) : null;
       const target = levelsRef.current;
 
       phaseRef.current += 0.12;
 
+      /*
+       * Данные с анализатора.
+       *
+       * Он подключён к <audio>-элементу и даёт настоящий спектр — волна
+       * бьёт под бит, как и задумано. Для YouTube анализатор молчит
+       * (звук идёт из IFrame, Web Audio туда не дотягивается), поэтому
+       * проверяем не «вернулось ли null», а есть ли в данных энергия:
+       * молчащий элемент отдаёт массив нулей, а не null.
+       */
+      const data = isActive ? getFrequencyLevels(bars) : null;
+
+      const hasEnergy =
+        data !== null && data.some((value) => value > 0.02);
+
+      if (data !== null) hasSignalRef.current = hasEnergy;
+
       for (let i = 0; i < bars; i++) {
         let desired: number;
 
-        if (data) {
+        if (data && hasEnergy) {
+          // Настоящий сигнал — реальная реакция на музыку.
           desired = data[i];
         } else if (isActive) {
-          // Анализатор недоступен, но трек играет — живая имитация.
+          /*
+           * Сигнала нет (YouTube или AudioContext ещё спит) — плавная
+           * имитация: две синусоиды с разными периодами дают живой
+           * пульсирующий рисунок вместо мёртвой прямой.
+           */
           desired =
             0.2 +
             0.4 *
@@ -786,11 +886,19 @@ function Waveform({ active }: { active: boolean }) {
                   Math.sin(phaseRef.current + i * 0.35) *
                   Math.sin(phaseRef.current * 0.5 + i * 0.1));
         } else {
+          // Пауза: полоски почти прижаты к низу.
           desired = 0.06;
         }
 
-        // Плавная интерполяция к целевому значению.
-        target[i] += (desired - target[i]) * (data ? 0.45 : 0.18);
+        /*
+         * Скорость интерполяции зависит от источника.
+         *
+         * С реальным сигналом полоски должны успевать за битом — берём
+         * быстрый отклик. С имитацией плавность важнее резкости, иначе
+         * движение выглядит дёрганым.
+         */
+        const smoothing = data && hasEnergy ? 0.45 : 0.18;
+        target[i] += (desired - target[i]) * smoothing;
 
         const node = nodes[i];
         if (node) {

@@ -79,50 +79,41 @@ textarea {
   font: inherit;
 }
 
-/* ── Минималистичные скроллбары ──────────────────────────────────────
- * Тонкая (5px) полоска, невидимый трек, скруглённый полупрозрачный thumb,
- * который окрашивается в акцент и ярче при наведении.
+/* ── Скрытые скроллбары ─────────────────────────────────────────────
+ *
+ * Полосы прокрутки убраны полностью: они выглядели как визуальный мусор
+ * поверх тёмного интерфейса, а прокрутка колесом, тачем и клавиатурой
+ * работает и без них.
+ *
+ * Скрываем и именованным классом, и глобально: классы остались на элементах
+ * с прошлой версии, а глобальное правило ловит всё остальное (списки окон,
+ * контейнеры с overflow, включая те, что появятся позже). Прокрутка
+ * при этом сохраняется — исчезает только сама полоса.
  */
-.noctra-scrollbar::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+
+.noctra-scrollbar,
+.noctra-scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
-.noctra-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
+.noctra-scrollbar::-webkit-scrollbar,
+.noctra-scrollbar-none::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
-.noctra-scrollbar::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--accent) 40%, transparent);
-  border-radius: 9999px;
-}
-
-.noctra-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: var(--accent);
-}
-
-/* Firefox (в т.ч. тонкие скроллбары) */
+/* Глобально: ни одной полосы прокрутки в приложении. */
 * {
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--accent) 45%, transparent) transparent;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
-::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--accent) 40%, transparent);
-  border-radius: 9999px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--accent);
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 @keyframes windowIn {

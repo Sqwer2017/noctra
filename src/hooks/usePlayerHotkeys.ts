@@ -40,6 +40,21 @@ function isTypingTarget(target: EventTarget | null): boolean {
   );
 }
 
+/**
+ * Фокус на кнопке или ссылке?
+ *
+ * Пробел на сфокусированной кнопке и так её нажимает (нативное поведение
+ * браузера). Если при этом ещё и переключать плеер, получится двойное
+ * действие: например, пробел на кнопке «Следующий трек» переключит трек
+ * кнопкой, а затем глобальный обработчик поставит его на паузу.
+ */
+function isButtonTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+
+  const tag = target.tagName;
+  return tag === "BUTTON" || tag === "A";
+}
+
 export function usePlayerHotkeys(): void {
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -54,6 +69,11 @@ export function usePlayerHotkeys(): void {
         case " ": {
           // Пробел по умолчанию прокручивает страницу — гасим.
           event.preventDefault();
+
+          // На кнопке пробел и так сработает как клик: не дублируем действие
+          // глобальным переключением плеера.
+          if (isButtonTarget(event.target)) return;
+
           player.requestToggle();
           return;
         }

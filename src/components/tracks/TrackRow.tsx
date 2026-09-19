@@ -9,6 +9,7 @@ import { useT } from "../../i18n/useT";
 import { toast } from "../ui/Toast";
 import { durationToSeconds } from "../../lib/format";
 import { MIX_DURATION_SECONDS } from "../../services/youtubeSearch";
+import { warmUpYouTubePlayer } from "../player/YouTubeBridge";
 
 type TrackRowProps = {
   track: PlaylistTrack;
@@ -87,6 +88,17 @@ export const TrackRow = memo(function TrackRow({
       onTogglePlay();
       return;
     }
+    /*
+     * Прогрев YouTube-плеера в контексте жеста.
+     *
+     * Мобильные браузеры разрешают звук из IFrame только если плеер создан
+     * в обработчике тапа. Наша цепочка (стор → эффект → ytLoadTrack)
+     * асинхронна, и жест к тому моменту уже «протухает». Поэтому греем
+     * плеер здесь, синхронно в тапе, — браузер запоминает разрешение.
+     */
+    if (track.source === "YouTube") {
+      warmUpYouTubePlayer();
+    }
     onPlay?.(track, queue);
   }, [isCurrent, onTogglePlay, onPlay, track, queue]);
 
@@ -135,11 +147,19 @@ export const TrackRow = memo(function TrackRow({
   const leftRatio = Math.max(0, Math.min(-dragX / SWIPE_THRESHOLD, 1));
 
   return (
-    <div className="relative rounded-2xl">
+    /*
+     * Карточка трека: мягкие углы, компактные отступы.
+     *
+     * Углы сглажены сильнее обычного (rounded-[20px] вместо rounded-2xl),
+     * но это не полукруг: у вытянутой карточки пилюля смотрелась бы странно.
+     * Отступы ужаты (p-2.5 вместо p-3), зазор между элементами меньше —
+     * карточка стала уже и аккуратнее, особенно в узкой мобильной колонке.
+     */
+    <div className="relative rounded-[20px]">
       {/* Подложка: свайп влево — в избранное (розово-красная) */}
       {toggleFavorite && (
         <div
-          className="pointer-events-none absolute inset-0 flex items-center justify-end gap-2 rounded-2xl bg-rose-500/30 pr-5 text-sm font-semibold text-white"
+          className="pointer-events-none absolute inset-0 flex items-center justify-end gap-2 rounded-[20px] bg-rose-500/30 pr-5 text-sm font-semibold text-white"
           style={{ opacity: leftRatio }}
           aria-hidden="true"
         >
@@ -151,7 +171,7 @@ export const TrackRow = memo(function TrackRow({
       {/* Подложка: свайп вправо — в очередь (акцентная) */}
       {onQueue && (
         <div
-          className="pointer-events-none absolute inset-0 flex items-center gap-2 rounded-2xl bg-purple-500/30 pl-5 text-sm font-semibold text-white"
+          className="pointer-events-none absolute inset-0 flex items-center gap-2 rounded-[20px] bg-purple-500/30 pl-5 text-sm font-semibold text-white"
           style={{ opacity: rightRatio }}
           aria-hidden="true"
         >
@@ -168,7 +188,7 @@ export const TrackRow = memo(function TrackRow({
         onDragStart={handleDragStart}
         onDrag={handleDragMove}
         onDragEnd={handleDragEnd}
-        className={`relative flex items-center gap-3 rounded-2xl border bg-neutral-900/60 p-3 transition-colors ${
+        className={`relative flex items-center gap-2.5 rounded-[20px] border bg-neutral-900/60 p-2.5 transition-colors ${
           isCurrent
             ? "border-purple-300/35 bg-purple-500/[0.08]"
             : "border-white/10"

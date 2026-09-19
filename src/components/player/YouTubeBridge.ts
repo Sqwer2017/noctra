@@ -122,6 +122,115 @@ let callbacks: BridgeCallbacks | null = null;
 let pendingVideoId: string | null = null;
 let apiScriptPromise: Promise<boolean> | null = null;
 
+/**
+ * Беззвучный буфер — страховка системной медиа-сессии.
+ *
+ * Некоторые браузеры глушат сессию, если в странице нет активного
+ * HTML5-потока: IFrame-плеер YouTube для них «не настоящий» звук. Тогда ОС
+ * перестаёт присылать команды от мыши и медиа-клавиш, хотя трек играет.
+ *
+ * Буфер — это зацикленный `<audio>` с секундой тишины на минимальной
+ * громкости. Он даёт браузеру формальный повод считать страницу
+ * «воспроизводящей звук», и сессия остаётся активной. Человек ничего не
+ * слышит: громкость 0.001 ниже порога восприятия, а сам файл — тишина.
+ *
+ * Тишина генерируется программно через Web Audio API, а не лежит файлом:
+ * так не нужен ни один байт в бандле, ни запрос в сеть. Создаётся лениво,
+ * только когда впервые понадобился для YouTube-трека.
+ */
+let silenceBuffer: HTMLAudioElement | null = null;
+
+/** Генерирует секунду тишины и возвращает её как data-URL. */
+function makeSilenceDataUrl(): string {
+  // Web Audio недоступен (очень старый браузер) — буфера не будет.
+  // Это не ошибка: буфер лишь страховка, а не обязательное условие.
+  const AudioContextClass =
+    window.AudioContext ??
+    (window as unknown as { webkitAudioContext?: typeof AudioContext })
+      .webkitAudioContext;
+
+  if (!AudioContextClass) return "";
+
+  const sampleRate = 8000;
+  const seconds = 1;
+  const context = new AudioContextClass({ sampleRate });
+  const buffer = context.createBuffer(1, sampleRate * seconds, sampleRate);
+
+  // Канал уже заполнен нулями (тишина) — ничего писать не нужно.
+  const channel = buffer.getChannelData(0);
+  channel.fill(0);
+
+  // Собираем WAV вручную: заголовок 44 байта + сэмплы.
+  const dataLength = channel.length;
+  const header = new ArrayBuffer(44);
+  const view = new DataView(header);
+
+  const writeString = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i++) {
+      view.setUint8(offset + i, text.charCodeAt(i));
+    }
+  };
+
+  writeString(0, "RIFF");
+  view.setUint32(4, 36 + dataLength, true);
+  writeString(8, "WAVE");
+  writeString(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate, true);
+  view.setUint16(32, 1, true);
+  view.setUint16(34, 8, true);
+  writeString(36, "data");
+  view.setUint32(40, dataLength, true);
+
+  const bytes = new Uint8Array(44 + dataLength);
+  bytes.set(new Uint8Array(header), 0);
+
+  for (let i = 0; i < dataLength; i++) {
+    // 8 бит: середина шкалы (128) — это тишина.
+    bytes[44 + i] = 128;
+  }
+
+  void context.close();
+
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+
+  return `data:audio/wav;base64,${btoa(binary)}`;
+}
+
+/** Запускает беззвучный буфер (для YouTube-треков). */
+function startSilenceBuffer(): void {
+  if (typeof document === "undefined") return;
+
+  if (!silenceBuffer) {
+    const url = makeSilenceDataUrl();
+    if (!url) return;
+
+    const element = document.createElement("audio");
+    element.src = url;
+    element.loop = true;
+    // 0.001, а не 0: полностью заглушенный элемент браузеры иногда
+    // тоже игнорируют при определении «звучащей» вкладки.
+    element.volume = 0.001;
+    element.setAttribute("aria-hidden", "true");
+    silenceBuffer = element;
+  }
+
+  // `play()` может отклониться до первого жеста пользователя — это нормально,
+  // буфер лишь страховка, а не обязательное условие.
+  void silenceBuffer.play().catch(() => {});
+}
+
+/** Останавливает беззвучный буфер (возврат к обычному треку). */
+function stopSilenceBuffer(): void {
+  silenceBuffer?.pause();
+}
+
 /** Зарегистрировать обработчики событий плеера. */
 export function setYouTubeCallbacks(next: BridgeCallbacks | null): void {
   callbacks = next;
@@ -188,6 +297,24 @@ function ensureContainer(): HTMLElement {
  * Возвращает `true`, если плеер готов. Повторные вызовы возвращают тот же
  * промис, поэтому параллельные обращения не создадут второй плеер.
  */
+/**
+ * Прогрев плеера в контексте жеста пользователя.
+ *
+ * Мобильные браузеры (особенно Safari) требуют, чтобы первое воспроизведение
+ * произошло в обработчике жеста — тап, клик. Наша цепочка запуска трека
+ * асинхронна (стор → эффект → ytLoadTrack), и к моменту вызова IFrame жест
+ * уже «протух»: браузер блокирует звук.
+ *
+ * Решение: вызывать эту функцию напрямую из обработчика тапа по треку.
+ * Она создаёт плеер заранее, пока жест ещё активен, — браузер запоминает
+ * разрешение, и последующие `loadVideoById` уже не блокируются.
+ *
+ * Вызов идемпотентен и дешёвый: если плеер уже готов, ничего не делает.
+ */
+export function warmUpYouTubePlayer(): void {
+  void initYouTubePlayer();
+}
+
 export function initYouTubePlayer(): Promise<boolean> {
   if (isReady && player) return Promise.resolve(true);
   if (loadPromise) return loadPromise;
@@ -259,6 +386,28 @@ export function initYouTubePlayer(): Promise<boolean> {
             resolve(true);
           },
           onStateChange: (event) => {
+            /*
+             * Синхронизация системной медиа-сессии.
+             *
+             * Браузер отслеживает воспроизведение через navigator.mediaSession.
+             * У обычных треков сессию держит `<audio>`-поток, а у YouTube
+             * активного HTML-потока нет — только IFrame. Без явного обновления
+             * `playbackState` браузер считает сессию уснувшей и перестаёт
+             * присылать команды от мыши и медиа-клавиш (next/prev молчат).
+             *
+             * Поэтому при каждом событии плеера подтверждаем состояние вручную.
+             * Это дублирует то, что делает useMediaSession по флагу isPlaying
+             * в сторе, но срабатывает раньше и надёжнее: событие приходит от
+             * самого плеера, а флаг стора обновляется уже как следствие.
+             */
+            if (typeof navigator !== "undefined" && "mediaSession" in navigator) {
+              if (event.data === YT_STATE.PLAYING) {
+                navigator.mediaSession.playbackState = "playing";
+              } else if (event.data === YT_STATE.PAUSED) {
+                navigator.mediaSession.playbackState = "paused";
+              }
+            }
+
             switch (event.data) {
               case YT_STATE.PLAYING:
                 callbacks?.onPlaying();
@@ -320,6 +469,10 @@ export async function ytLoadTrack(
 
   if (autoplay) {
     player.loadVideoById(videoId);
+    // Буфер запускаем вместе с воспроизведением: он держит медиа-сессию
+    // активной, пока звучит IFrame. Без него браузер может решить, что
+    // страница молчит, и перестать присылать команды от мыши и клавиш.
+    startSilenceBuffer();
   } else {
     player.cueVideoById(videoId);
   }
@@ -327,10 +480,12 @@ export async function ytLoadTrack(
 
 export function ytPlay(): void {
   player?.playVideo();
+  startSilenceBuffer();
 }
 
 export function ytPause(): void {
   player?.pauseVideo();
+  stopSilenceBuffer();
 }
 
 export function ytSeek(seconds: number): void {

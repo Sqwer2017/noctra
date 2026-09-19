@@ -5,6 +5,14 @@
 const en = {
   "brand.tagline": "MUSIC IS IDENTITY",
 
+  "mobile.nav.label": "Navigation",
+  "mobile.miniPlayer.expand": "Open player",
+  "mobile.sheet.nowPlaying": "Now playing",
+  "mobile.sheet.userQueue": "Your queue",
+  "mobile.sheet.queue": "Queue",
+  "mobile.sheet.queueEmpty": "Queue is empty",
+  "mobile.sheet.nextTrack": "Next track",
+
   "win.category.Profile": "Profile",
   "win.category.Music": "Music",
   "win.category.Social": "Social",
@@ -417,8 +425,15 @@ const en = {
   "settings.audius": "Audius",
   "settings.youtube": "YouTube",
   "settings.telegram.bot": "Telegram Bot",
+  "settings.active": "Active",
+  "settings.source.soundcloud": "Search and play tracks from SoundCloud.",
+  "settings.source.audius": "Open Audius API: search and streaming without keys.",
+  "settings.source.telegram": "Tracks from the Telegram bot via our own server proxy.",
+  "settings.source.youtube": "Search via Invidious mirrors, playback via the embedded YouTube player.",
   "settings.notConnected":
     "Not connected yet. Set up through backend/serverless functions, not directly in frontend code.",
+  "settings.telegram.synced": "Done: {count} tracks",
+  "settings.telegram.syncError": "Sync failed. Check your connection.",
   "settings.apiSafety": "API safety",
   "settings.apiSafety.body":
     "API keys and Telegram bot tokens must never be stored directly in frontend code.",

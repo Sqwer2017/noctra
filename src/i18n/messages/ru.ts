@@ -7,6 +7,15 @@ const ru = {
   // ── глобально / лого ──────────────────────────────────────────────
   "brand.tagline": "MUSIC IS IDENTITY",
 
+  // ── мобильная версия ─────────────────────────────────────────────
+  "mobile.nav.label": "Навигация",
+  "mobile.miniPlayer.expand": "Открыть плеер",
+  "mobile.sheet.nowPlaying": "Сейчас играет",
+  "mobile.sheet.userQueue": "Ваша очередь",
+  "mobile.sheet.queue": "Очередь",
+  "mobile.sheet.queueEmpty": "Очередь пуста",
+  "mobile.sheet.nextTrack": "Следующий трек",
+
   // ── окна (шапка / сайдбар / registry) ──────────────────────────────
   "win.category.Profile": "Профиль",
   "win.category.Music": "Музыка",
@@ -436,8 +445,15 @@ const ru = {
   "settings.audius": "Audius",
   "settings.youtube": "YouTube",
   "settings.telegram.bot": "Telegram-бот",
+  "settings.active": "Активен",
+  "settings.source.soundcloud": "Поиск и воспроизведение треков из SoundCloud.",
+  "settings.source.audius": "Открытый API Audius: поиск и стриминг без ключей.",
+  "settings.source.telegram": "Треки из Telegram-бота через собственный серверный прокси.",
+  "settings.source.youtube": "Поиск через зеркала Invidious, воспроизведение через встроенный плеер YouTube.",
   "settings.notConnected":
     "Пока не подключено. Настраивается через бэкенд/serverless-функции, а не напрямую во фронтенд-коде.",
+  "settings.telegram.synced": "Готово: {count} треков",
+  "settings.telegram.syncError": "Не удалось синхронизировать. Проверь соединение.",
   "settings.apiSafety": "Безопасность API",
   "settings.apiSafety.body":
     "API-ключи и токены Telegram-ботов никогда не должны храниться прямо во фронтенд-коде.",
