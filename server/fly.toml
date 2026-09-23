@@ -5,21 +5,22 @@
 # корневом package.json и собирает статический сайт. Сервер при этом не
 # запускается, и весь /api отдаёт 404.
 #
-# Деплой из корня репозитория:
+# Рабочий каталог на Fly выставлен в server/, поэтому путь к Dockerfile
+# указывается от него, а не от корня репозитория:
 #   fly deploy --config server/fly.toml
 
-app = "noctra-api"
+app = "noctra"
 primary_region = "fra"
 
 [build]
-  # Путь от корня репозитория до Dockerfile.
-  dockerfile = "server/Dockerfile"
+  # Относительно рабочего каталога на Fly (server/).
+  dockerfile = "Dockerfile"
 
 [env]
   PORT = "8080"
   # Без PUBLIC_URL сервер собирает ссылки на аудио через localhost,
   # и ни один трек не играет. Прод-адрес задаётся здесь.
-  PUBLIC_URL = "https://noctra-api.fly.dev"
+  PUBLIC_URL = "https://noctra.fly.dev"
 
 [http_service]
   internal_port = 8080
@@ -46,13 +47,17 @@ primary_region = "fra"
   method = "GET"
   path = "/api/health"
 
-# Тома в Fly привязываются к машине. Том создаётся заранее:
+# Тома в Fly привязываются к машине. Секция закомментирована, иначе
+# `fly deploy` требует заранее созданный том и падает с ошибкой.
+# Чтобы кэш треков переживал перезапуск, создай том и раскомментируй:
 #   fly volumes create noctra_data --size 1 --region fra
-# Здесь он только монтируется в /app/data — ровно туда, где index.js
-# держит кэш треков (process.cwd()/data).
-[[mounts]]
-  source = "noctra_data"
-  destination = "/app/data"
+#
+# Без тома корневая ФС контейнера эфемерна: кэш стирается при каждом
+# деплое, и сервер пересобирает его из Telegram при старте.
+#
+# [[mounts]]
+#   source = "noctra_data"
+#   destination = "/app/data"
 
 [[vm]]
   size = "shared-cpu-1x"
