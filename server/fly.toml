@@ -1,0 +1,63 @@
+# Конфиг приложения Fly.io для бэкенда Noctra.
+#
+# Ключевое поле — `dockerfile`. Без него Fly ищет Dockerfile в корне
+# репозитория, не находит и переключается на авто-детект: видит Vite в
+# корневом package.json и собирает статический сайт. Сервер при этом не
+# запускается, и весь /api отдаёт 404.
+#
+# Деплой из корня репозитория:
+#   fly deploy --config server/fly.toml
+
+app = "noctra-api"
+primary_region = "fra"
+
+[build]
+  # Путь от корня репозитория до Dockerfile.
+  dockerfile = "server/Dockerfile"
+
+[env]
+  PORT = "8080"
+  # Без PUBLIC_URL сервер собирает ссылки на аудио через localhost,
+  # и ни один трек не играет. Прод-адрес задаётся здесь.
+  PUBLIC_URL = "https://noctra-api.fly.dev"
+
+[http_service]
+  internal_port = 8080
+  # Обязательно: при масштабировании до нуля Fly останавливает машины,
+  # и первый запрос после простоя получает 502.
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+  # Аудио отдаётся стримом, поэтому обычные короткие таймауты не подходят.
+  [http_service.http_options.response]
+    pristine = false
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "15s"
+  method = "GET"
+  path = "/api/health"
+
+# Тома в Fly привязываются к машине. Том создаётся заранее:
+#   fly volumes create noctra_data --size 1 --region fra
+# Здесь он только монтируется в /app/data — ровно туда, где index.js
+# держит кэш треков (process.cwd()/data).
+[[mounts]]
+  source = "noctra_data"
+  destination = "/app/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+# Секреты задаются не здесь, а командами (в файл не попадают):
+#   fly secrets set TELEGRAM_BOT_TOKEN=...
+#   fly secrets set CORS_ORIGINS=https://ваш-домен.vercel.app
