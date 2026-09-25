@@ -34,6 +34,11 @@ import { useProgressionStore } from "../../store/useProgressionStore";
 import { TrackFocusModal } from "../player/TrackFocusModal";
 import { motion } from "motion/react";
 import { attachAnalyser, resumeAnalyser } from "../../audio/analyser";
+import { Capacitor } from "@capacitor/core";
+import {
+  canResolveNatively,
+  resolveYouTubeAudio,
+} from "../../services/youtubeExtractor";
 import {
   YT_STATE,
   initYouTubePlayer,
@@ -61,6 +66,56 @@ const LOAD_TIMEOUT_MS = 12_000;
 
 /** Сколько раз пробовать перезагрузить поток перед переходом к следующему. */
 const MAX_RECOVERY_ATTEMPTS = 2;
+
+/**
+ * Сколько ждать при ответе «слишком часто» (HTTP 429).
+ *
+ * Telegram ограничивает `getFile` частотой 1 запрос в секунду, и на Android
+ * `<audio>` дёргает эндпоинт всплеском — метаданные, буферизация, переподключение.
+ * При лимите НЕЛЬЗЯ переключать трек: следующий запрос снова упрётся в тот же
+ * лимит, и очередь проматывается каскадом, молча пропуская все треки.
+ */
+const RATE_LIMIT_RETRY_MS = 1_500;
+
+/** Сколько раз пережидать лимит, прежде чем сдаться на текущем треке. */
+const MAX_RATE_LIMIT_WAITS = 4;
+
+/**
+ * Проверяет поток обычным GET-запросом, прежде чем отдавать его `<audio>`.
+ *
+ * ЗАЧЕМ ЭТО НУЖНО
+ * ---------------
+ * Событие `error` у `<audio>` не сообщает HTTP-код ответа: элемент различает
+ * лишь четыре обобщённые причины (MEDIA_ERR_NETWORK, MEDIA_ERR_SRC_NOT_SUPPORTED
+ * и т.д.). Различить «файла нет» и «Telegram просит подождать» через него
+ * невозможно, а поведение нужно противоположное.
+ *
+ * Заголовок `Range: bytes=0-0` заставляет сервер ответить `206` и одним байтом
+ * — полноценная загрузка для проверки не нужна.
+ *
+ * Возвращает `"ok"` — поток живой; `"rate-limited"` — нужно подождать;
+ * `"failed"` — источник недоступен.
+ */
+async function probeMediaStream(
+  url: string,
+  signal: AbortSignal,
+): Promise<"ok" | "rate-limited" | "failed"> {
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { Range: "bytes=0-0" },
+      signal,
+    });
+
+    if (response.ok || response.status === 206) return "ok";
+    if (response.status === 429) return "rate-limited";
+    return "failed";
+  } catch (error) {
+    // Отмена из-за смены трека — не сбой, но проверка не состоялась.
+    if (error instanceof Error && error.name === "AbortError") return "failed";
+    return "failed";
+  }
+}
 
 type BottomPlayerProps = {
   currentTrack: PlaylistTrack | null;
@@ -150,8 +205,41 @@ export function BottomPlayer({
   /** Сколько раз пытались восстановить текущий поток. */
   const recoveryAttemptsRef = useRef(0);
 
+  /**
+   * Сколько раз подряд текущий трек упирался в лимит запросов Telegram.
+   *
+   * Считается ОТДЕЛЬНО от `recoveryAttemptsRef`: ожидание лимита — не сбой
+   * потока, и тратить на него запас попыток восстановления нельзя. Иначе
+   * после четырёх ожиданий трек считался бы битым и очередь поехала бы дальше.
+   *
+   * Сбрасывается в ноль, когда трек наконец заиграл.
+   */
+  const rateLimitWaitsRef = useRef(0);
+
+  /**
+   * Трек, на котором исчерпаны ожидания лимита.
+   *
+   * Нужен, чтобы не зациклиться: если Telegram держит лимит дольше, чем мы
+   * готовы ждать, трек пропускается ОДИН раз, а не бесконечно.
+   */
+  const rateLimitGaveUpRef = useRef<string | null>(null);
+
   /** Трек не удалось загрузить — показываем это в интерфейсе. */
   const [playbackError, setPlaybackError] = useState(false);
+
+  /**
+   * Играет ли текущий YouTube-трек через обычный `<audio>`.
+   *
+   * НА УСТРОЙСТВЕ прямой поток обычно получить удаётся, и тогда трек играет
+   * как все остальные — с фоновым воспроизведением. Если поток недоступен
+   * (ролик закрыт для анонимного доступа), плеер откатывается на встроенный
+   * проигрыватель, и флаг становится `false`.
+   *
+   * От флага зависит только информационная подпись в интерфейсе: сам плеер
+   * разбирается со способом воспроизведения сам.
+   */
+  const [supportsBackgroundPlayback, setSupportsBackgroundPlayback] =
+    useState(false);
 
   /**
    * Играет ли YouTube-трек.
@@ -216,7 +304,15 @@ export function BottomPlayer({
       pause: () => {
         shouldAutoPlayRef.current = false;
 
-        if (isYouTubeRef.current) ytPause();
+        /*
+         * Останавливаем ТОТ плеер, который звучит.
+         *
+         * Раньше здесь стояла проверка «трек из YouTube» — и этого было
+         * достаточно, пока все YouTube-треки играли через встроенный плеер.
+         * Теперь часть из них идёт через `<audio>`, и такая проверка
+         * останавливала бы не тот источник: музыка продолжала бы играть.
+         */
+        if (isEmbeddedPlayerRef.current) ytPause();
         else audioRef.current?.pause();
 
         setIsPlayingInStore(false);
@@ -229,13 +325,13 @@ export function BottomPlayer({
        * тот плеер, который сейчас звучит, иначе ответ был бы всегда «пауза».
        */
       getIsPlaying: () => {
-        if (isYouTubeRef.current) {
+        if (isEmbeddedPlayerRef.current) {
           return ytGetState() === YT_STATE.PLAYING;
         }
         return Boolean(audioRef.current && !audioRef.current.paused);
       },
       seek: (seconds) => {
-        if (isYouTubeRef.current) {
+        if (isEmbeddedPlayerRef.current) {
           ytSeek(seconds);
         } else if (audioRef.current) {
           audioRef.current.currentTime = seconds;
@@ -264,17 +360,37 @@ export function BottomPlayer({
   /*
    * Подключаем Web Audio анализатор к аудио-элементу (для waveform в профиле).
    *
-   * `crossOrigin` выставляется атрибутом на самом элементе (см. JSX), а не
-   * здесь: этот эффект выполняется ПОСЛЕ первого рендера, когда `src` уже
-   * начал грузиться. Установка CORS задним числом приводила к тому, что
-   * первый трек сессии не проходил проверку и не играл.
+   * ПОЧЕМУ ЭТО ОТЛОЖЕНО ДО ПЕРВОГО ОБЫЧНОГО ТРЕКА
+   * --------------------------------------------
+   * `createMediaElementSource` можно вызвать для элемента РОВНО ОДИН РАЗ,
+   * и он требует строгий CORS. У прямых ссылок `googlevideo` (их отдаёт
+   * нативный резолвер YouTube) заголовка CORS нет — подключение анализатора
+   * к такому элементу ломает воспроизведение целиком.
+   *
+   * Раньше анализатор подключался сразу при монтировании — то есть ДО того,
+   * как становился известен источник. К моменту YouTube-трека он был уже
+   * подключён, и отменить это нельзя. Теперь подключаем только тогда, когда
+   * точно играет источник со своего домена.
    */
   useEffect(() => {
     const el = audioRef.current;
     if (!el) return;
 
+    // YouTube играет с googlevideo — там CORS нет, анализатор не подключаем.
+    if (isYouTube) return;
+
+    /*
+     * Подключаем к обычному источнику.
+     *
+     * Если анализатор уже был подключён раньше (обычный трек играл до этого),
+     * `attachAnalyser` вернёт существующий — повторный вызов безопасен.
+     *
+     * Если же YouTube играл ПЕРВЫМ, элемент не был привязан к Web Audio,
+     * и сейчас самое время это сделать: `createMediaElementSource` работает
+     * с любым текущим состоянием элемента.
+     */
     attachAnalyser(el);
-  }, []);
+  }, [isYouTube]);
 
   /*
    * «Треков прослушано» — счётчик полных прослушиваний.
@@ -298,6 +414,32 @@ export function BottomPlayer({
   useEffect(() => {
     isYouTubeRef.current = isYouTube;
   }, [isYouTube]);
+
+  /**
+   * Играет ли YouTube-трек через встроенный плеер прямо сейчас.
+   *
+   * ЗАЧЕМ ОТДЕЛЬНЫЙ ФЛАГ
+   * --------------------
+   * Мало знать, что трек из YouTube: важно, КАК он играет. На устройстве
+   * прямой поток обычно получить удаётся, и тогда трек звучит через обычный
+   * `<audio>` — как Telegram. Но если ролик закрыт для анонимного доступа,
+   * плеер откатывается на встроенный проигрыватель.
+   *
+   * От этого зависит ВСЁ управление: пауза, перемотка, громкость и позиция
+   * берутся из разных мест. Если спросить не тот плеер, команды уйдут
+   * в никуда — например, пауза нажмётся, а звук продолжится.
+   *
+   * Ref, а не состояние: мост управления регистрируется один раз
+   * и должен читать актуальное значение, а не запомненное при регистрации.
+   */
+  const isEmbeddedPlayerRef = useRef(true);
+
+  useEffect(() => {
+    // У не-YouTube треков всегда играет `<audio>`, встроенный плеер не нужен.
+    isEmbeddedPlayerRef.current = isYouTube
+      ? !supportsBackgroundPlayback
+      : false;
+  }, [isYouTube, supportsBackgroundPlayback]);
 
   /*
    * События встроенного YouTube-плеера.
@@ -365,17 +507,18 @@ export function BottomPlayer({
   }, []);
 
   /*
-   * Опрос позиции YouTube-трека.
+   * Опрос позиции встроенного YouTube-плеера.
    *
    * У `<audio>` есть событие `timeupdate`, которое само двигает ползунок.
    * У встроенного плеера такого события нет — позицию приходится спрашивать.
    * 250 мс достаточно для плавного движения и при этом незаметно по нагрузке.
    *
-   * Опрос идёт только когда трек действительно играет: в паузе позиция
-   * не меняется, и опрашивать нечего.
+   * Опрос идёт только когда трек действительно играет ЧЕРЕЗ ВСТРОЕННЫЙ плеер:
+   * если тот же трек звучит через `<audio>`, позицию двигает `timeupdate`,
+   * и опрос только дублировал бы обновления.
    */
   useEffect(() => {
-    if (!isYouTube || !isPlaying) return;
+    if (!isYouTube || !isPlaying || supportsBackgroundPlayback) return;
 
     const id = window.setInterval(() => {
       const time = ytGetCurrentTime();
@@ -391,7 +534,13 @@ export function BottomPlayer({
     }, 250);
 
     return () => window.clearInterval(id);
-  }, [isYouTube, isPlaying, setStoreCurrentTime, setStoreDuration]);
+  }, [
+    isYouTube,
+    isPlaying,
+    supportsBackgroundPlayback,
+    setStoreCurrentTime,
+    setStoreDuration,
+  ]);
 
   // Прогрессия: считаем прослушанное время раз в секунду, пока играет.
   useEffect(() => {
@@ -458,12 +607,43 @@ export function BottomPlayer({
     const track = currentTrackRef.current;
 
     /*
+     * ДИАГНОСТИКА ПЛАТФОРМЫ.
+     *
+     * Логи нужны, чтобы понять, почему на устройстве не срабатывает нативный
+     * резолвер: без них не видно ни платформы, ни того, доходит ли управление
+     * до нужной ветки. В APK нет панели разработчика, и это единственный
+     * способ увидеть состояние в Logcat.
+     */
+    console.log(
+      "[Player] Platform native:",
+      Capacitor.isNativePlatform(),
+      "| platform:",
+      Capacitor.getPlatform(),
+    );
+    console.log(
+      "[Player] Playing track source:",
+      track?.source,
+      "| videoId:",
+      track?.videoId ?? "—",
+    );
+
+    /*
      * ВЕТКА YOUTUBE.
      *
-     * У таких треков нет `streamUrl` — прямой поток YouTube недоступен,
-     * поэтому играет встроенный плеер. Здесь другой запуск, другой сторож
-     * загрузки и другой способ остановки, поэтому логика вынесена отдельно,
-     * а не размазана условиями по общему коду.
+     * ДВА СПОСОБА, И ВЫБОР ЗАВИСИТ ОТ ПЛАТФОРМЫ.
+     *
+     * НА УСТРОЙСТВЕ (Capacitor) сначала пробуем получить прямой аудиопоток
+     * и играть через обычный `<audio>` — тот же, что играет Telegram-треки.
+     * Только так работает фоновое воспроизведение: встроенный плеер YouTube
+     * на Android глушится системой при блокировке экрана.
+     *
+     * В БРАУЗЕРЕ прямой поток получить нельзя (CORS и блокировка с серверных
+     * IP), поэтому там остаётся встроенный проигрыватель. На ПК он работает
+     * надёжно и полностью закрывает потребность.
+     *
+     * Если нативный резолвер не справился — откатываемся на встроенный
+     * проигрыватель. Трек в этом случае зазвучит при открытом экране; лучше
+     * так, чем молчащая карточка.
      */
     if (isYouTubeTrack(track) && track) {
       shouldAutoPlayRef.current = true;
@@ -477,31 +657,110 @@ export function BottomPlayer({
         playModeRef.current === "shuffle",
       );
 
-      /*
-       * Глушим обычный плеер.
-       *
-       * Без этого при переключении с Telegram-трека на YouTube играли бы оба:
-       * `<audio>` продолжает воспроизведение, пока его не остановят.
-       * `removeAttribute("src")` с последующим `load()` полностью освобождает
-       * поток — иначе браузер продолжит тянуть данные в фоне.
-       */
       const element = audioRef.current;
+
+      /*
+       * Глушим оба возможных источника.
+       *
+       * Без этого при переключении между треками звучали бы оба: `<audio>`
+       * продолжает воспроизведение, пока его не остановят, а встроенный
+       * плеер — пока его не поставишь на паузу.
+       */
       if (element) {
         element.pause();
         element.removeAttribute("src");
         element.load();
       }
 
-      // Инициализация асинхронная: первый YouTube-трек в сессии ждёт загрузки
-      // IFrame API. Промис не ждём — трек загрузится по событию onReady.
-      if (isYouTubeReady()) {
-        void ytLoadTrack(track.videoId!, true);
-      } else {
-        void initYouTubePlayer();
-      }
+      ytPause();
+
+      /** Запуск через встроенный проигрыватель — общий запасной путь. */
+      const startEmbedded = () => {
+        if (isYouTubeReady()) {
+          void ytLoadTrack(track.videoId!, true);
+        } else {
+          void initYouTubePlayer();
+        }
+      };
 
       /*
-       * Сторож для YouTube.
+       * На устройстве — пробуем нативный резолвер.
+       *
+       * `cancelled` защищает от гонки: человек может переключить трек, пока
+       * запрос в полёте, и поздний ответ не должен перезаписать состояние
+       * уже следующего трека.
+       */
+      if (canResolveNatively()) {
+        console.log("[Player] нативная платформа → запускаю резолвер");
+
+        let cancelled = false;
+
+        void (async () => {
+          const stream = await resolveYouTubeAudio(track.videoId!);
+          if (cancelled) return;
+
+          if (!stream) {
+            /*
+             * Резолвер не справился: либо ролик закрыт для анонимного
+             * доступа, либо ссылка отдаёт только начало файла.
+             * Переключаемся на встроенный проигрыватель.
+             */
+            console.info(
+              "[player] прямой поток недоступен — играем через встроенный плеер",
+            );
+
+            setSupportsBackgroundPlayback(false);
+            startEmbedded();
+            return;
+          }
+
+          /*
+           * Поток получен и проверен: играем как обычный трек.
+           *
+           * Ссылка ставится напрямую, а не через состояние: эффект выполняется
+           * до того, как React применит атрибут, и `play()` ушёл бы в элемент
+           * без источника.
+           */
+          setSupportsBackgroundPlayback(true);
+
+          const node = audioRef.current;
+          if (!node) return;
+
+          node.src = stream.url;
+          node.load();
+
+          if (!shouldAutoPlayRef.current) return;
+
+          try {
+            await node.play();
+            setIsPlayingInStore(true);
+          } catch (error) {
+            const name = error instanceof Error ? error.name : "";
+
+            // Отмена из-за смены трека — не сбой.
+            if (name === "AbortError") return;
+
+            console.warn("[player] не удалось запустить поток YouTube:", error);
+            setPlaybackError(true);
+            setIsPlayingInStore(false);
+          }
+        })();
+
+        return () => {
+          cancelled = true;
+        };
+      }
+
+      // Браузер: сразу встроенный проигрыватель.
+      console.log(
+        "[Player] платформа не нативная → сразу встроенный плеер YouTube",
+      );
+
+      setSupportsBackgroundPlayback(false);
+      startEmbedded();
+
+      /*
+       * Сторож для встроенного плеера.
        *
        * Обычный `<audio>` сообщает о загрузке событием `canplay`, а плеер
        * YouTube — состоянием. Поэтому проверяем его состояние: если через
@@ -565,19 +824,78 @@ export function BottomPlayer({
 
     const element = audioRef.current;
 
-    // Смена источника сразу сбрасывает счётчики восстановления.
+    /*
+     * Счётчики восстановления и ожиданий лимита сбрасываются на КАЖДОМ новом
+     * треке — это правильно для попыток загрузки, но у лимита есть нюанс.
+     *
+     * Раньше сброс `recoveryAttemptsRef` в ноль на каждой смене трека означал,
+     * что при каскадном проматывании каждый трек получал полный запас попыток,
+     * то есть 3 новых запроса к `getFile`. На быстрой прокрутке это не давало
+     * лимиту остыть, а усугубляло его. Теперь ожидания лимита считаются
+     * отдельно, и на трек, где лимит исчерпан, попытки не тратятся вовсе.
+     */
     recoveryAttemptsRef.current = 0;
+    rateLimitWaitsRef.current = 0;
 
     /*
-     * Запускаем загрузку вручную.
+     * Проверяем поток ДО загрузки — и, если Telegram просит подождать,
+     * пережидаем лимит, не трогая текущий трек.
      *
-     * `<audio src>` обновляется React'ом, но полагаться только на это нельзя:
-     * при переходе между треками элемент может сохранить прежнее состояние
-     * загрузки, и `canplay` не придёт. Явный `load()` гарантирует, что поток
-     * начнут тянуть заново.
+     * ПОЧЕМУ ИМЕННО ТАК
+     * -----------------
+     * `getFile` в Telegram ограничен частотой 1 запрос в секунду. На Android
+     * `<audio>` обращается к эндпоинту всплеском (метаданные, буферизация,
+     * переподключение после сворачивания), упирается в лимит и получает 429.
+     * Событие `error` у `<audio>` кода ответа не несёт, поэтому плеер считал
+     * трек битым и переходил к следующему — а тот снова попадал в лимит.
+     * Так очередь проматывалась целиком, и «второй трек не играет».
+     *
+     * Отмена через AbortController обязательна: пока идёт проверка, человек
+     * может переключить трек, и поздний ответ не должен ничего запускать.
      */
-    element.pause();
-    element.load();
+    const probeController = new AbortController();
+    const streamUrl = track.streamUrl;
+
+    const loadAndWatch = async () => {
+      const result = await probeMediaStream(streamUrl, probeController.signal);
+
+      if (probeController.signal.aborted) return;
+
+      /*
+       * Лимит запросов: ждём и пробуем снова ТОТ ЖЕ трек.
+       *
+       * Переключение здесь было бы ошибкой: следующий трек обратится к тому же
+       * эндпоинту и получит тот же отказ. Именно это проматывало очередь.
+       */
+      if (result === "rate-limited") {
+        rateLimitWaitsRef.current += 1;
+
+        if (rateLimitWaitsRef.current <= MAX_RATE_LIMIT_WAITS) {
+          console.info(
+            `[player] Telegram просит подождать, ожидание ${rateLimitWaitsRef.current}/${MAX_RATE_LIMIT_WAITS}`,
+          );
+
+          window.setTimeout(() => {
+            if (probeController.signal.aborted) return;
+            void loadAndWatch();
+          }, RATE_LIMIT_RETRY_MS);
+          return;
+        }
+
+        /*
+         * Лимит держится дольше, чем разумно ждать. Пропускаем трек ОДИН раз:
+         * запоминаем id, чтобы сторож не отправил нас по кругу.
+         */
+        console.warn("[player] лимит Telegram не отпустил, пропускаем трек");
+        rateLimitGaveUpRef.current = track.id;
+      }
+
+      // Проверка пройдена (либо лимит исчерпан) — грузим поток как обычно.
+      element.pause();
+      element.load();
+    };
+
+    void loadAndWatch();
 
     /*
      * СТОРОЖ ЗАГРУЗКИ.
@@ -612,6 +930,21 @@ export function BottomPlayer({
       // Воспроизведение уже пошло — сторож не нужен.
       if (!el.paused && el.currentTime > 0) return;
 
+      /*
+       * На этом треке лимит Telegram так и не отпустил.
+       *
+       * Пропускаем его БЕЗ попыток восстановления: каждая попытка — это новый
+       * запрос к `getFile`, то есть ещё один виток лимита. Здесь очередь
+       * действительно должна поехать дальше.
+       */
+      if (rateLimitGaveUpRef.current === currentTrackRef.current?.id) {
+        console.warn("[player] трек пропущен из-за лимита Telegram");
+        setPlaybackError(true);
+        setIsPlayingRef.current(false);
+        nextTrackRef.current();
+        return;
+      }
+
       // Поток не стартовал. Пробуем восстановиться.
       recoveryAttemptsRef.current += 1;
 
@@ -636,7 +969,17 @@ export function BottomPlayer({
       nextTrackRef.current();
     }, LOAD_TIMEOUT_MS);
 
-    return () => window.clearTimeout(watchdog);
+    return () => {
+      /*
+       * Отменяем проверку потока и сторож.
+       *
+       * Без отмены поздний ответ на проверку уже неактуального трека вызвал бы
+       * `load()` поверх нового источника — и вместо выбранного трека зазвучал
+       * бы предыдущий.
+       */
+      probeController.abort();
+      window.clearTimeout(watchdog);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentTrack?.id, currentTrack?.streamUrl, currentTrack?.videoId]);
 
@@ -648,7 +991,7 @@ export function BottomPlayer({
     if (Number.isNaN(nextTime)) return;
 
     // Перемотка идёт в тот плеер, который сейчас звучит.
-    if (isYouTube) {
+    if (isEmbeddedPlayerRef.current) {
       ytSeek(nextTime);
     } else if (audioRef.current) {
       audioRef.current.currentTime = nextTime;
@@ -703,7 +1046,7 @@ export function BottomPlayer({
 
     shouldAutoPlayRef.current = false;
 
-    if (isYouTube) ytPause();
+    if (isEmbeddedPlayerRef.current) ytPause();
     else audioRef.current?.pause();
 
     setIsPlayingInStore(false);
@@ -713,14 +1056,14 @@ export function BottomPlayer({
     if (!canPlay) return;
 
     /*
-     * Запуск YouTube-трека.
+     * Запуск через встроенный плеер YouTube.
      *
-     * Прямой поток у YouTube недоступен, воспроизведением управляет встроенный
-     * плеер. Состояние в стор придёт по событию `onPlaying` — здесь его
-     * выставлять нельзя, иначе интерфейс покажет «играет» раньше, чем звук
-     * действительно пойдёт.
+     * Только когда прямой поток получить не удалось: тогда воспроизведением
+     * управляет IFrame, и состояние в стор придёт по событию `onPlaying` —
+     * здесь его выставлять нельзя, иначе интерфейс покажет «играет» раньше,
+     * чем звук действительно пойдёт.
      */
-    if (isYouTube) {
+    if (isEmbeddedPlayerRef.current) {
       const track = currentTrackRef.current;
       if (!track?.videoId) return;
 
@@ -981,13 +1324,32 @@ export function BottomPlayer({
           /*
            * Источник подставляем только для обычных треков.
            *
-           * YouTube-треки играет встроенный плеер, и `src` здесь быть не должно:
-           * иначе браузер начнёт грузить заведомо недоступный прямой поток,
-           * сработает `onError`, и плеер посчитает исправный трек сбойным.
+           * YouTube-треки получают адрес позже — когда нативный резолвер
+           * его добудет (см. ветку YouTube в эффекте смены трека).
            */
           src={isYouTube ? undefined : currentTrack?.streamUrl}
           preload="metadata"
-          crossOrigin="anonymous"
+          /*
+           * CORS — ТОЛЬКО ДЛЯ СВОИХ ИСТОЧНИКОВ.
+           *
+           * ЗАЧЕМ ЭТО ВАЖНО
+           * ---------------
+           * Атрибут `crossOrigin="anonymous"` заставляет браузер требовать
+           * заголовок `Access-Control-Allow-Origin` от сервера потока.
+           * У Telegram и прочих наших источников он есть, у `googlevideo`
+           * его НЕТ — поэтому жёстко выставленный атрибут ломал YouTube:
+           *
+           *   Access to audio at 'https://rr4...googlevideo.com' from origin
+           *   'https://localhost' has been blocked by CORS policy
+           *
+           * Без атрибута `<audio>` играет кросс-доменные потоки свободно:
+           * это обычное воспроизведение, а не чтение данных через JS.
+           *
+           * Плата — анализатор спектра: `createMediaElementSource` требует
+           * CORS. Для YouTube визуализация уйдёт в режим имитации, что уже
+           * предусмотрено в компоненте волны.
+           */
+          crossOrigin={isYouTube ? undefined : "anonymous"}
           onError={handleAudioError}
           onCanPlay={() => {
             if (!shouldAutoPlayRef.current) return;
@@ -1000,9 +1362,17 @@ export function BottomPlayer({
             setCurrentTime(t);
             setStoreCurrentTime(t);
 
-            // Воспроизведение реально идёт — сбрасываем попытки восстановления,
-            // чтобы следующий сбой снова получил полный запас попыток.
+            /*
+             * Воспроизведение реально идёт — сбрасываем попытки восстановления,
+             * чтобы следующий сбой снова получил полный запас попыток.
+             *
+             * Здесь же обнуляем ожидания лимита: раз поток пошёл, Telegram
+             * отпустил частоту, и следующий трек не должен ждать из-за
+             * накопленного счётчика.
+             */
             recoveryAttemptsRef.current = 0;
+            rateLimitWaitsRef.current = 0;
+            rateLimitGaveUpRef.current = null;
           }}
           onLoadedMetadata={(event) => {
             setAudioDuration(event.currentTarget.duration);
@@ -1347,6 +1717,22 @@ export function BottomPlayer({
         ) : (
           <p className="truncate text-xs text-purple-100/45">
             {artist} · {source}
+            {/*
+              Пометка о фоновом воспроизведении.
+              
+              Показывается только для YouTube-треков, которые играют через
+              `<audio>`: это значит, что музыка не прервётся при выключенном
+              экране. Если пометки нет — трек идёт через встроенный плеер
+              YouTube и в фоне замолчит.
+            */}
+            {isYouTube && supportsBackgroundPlayback && (
+              <span
+                className="ml-1.5 text-[10px] text-emerald-300/70"
+                title={t("player.backgroundPlayback")}
+              >
+                ● фоновый режим
+              </span>
+            )}
           </p>
         )}
       </div>

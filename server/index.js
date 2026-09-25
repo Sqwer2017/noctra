@@ -282,6 +282,31 @@ async function processTelegramUpdate(update) {
   return track;
 }
 
+/**
+ * Ошибка синхронизации с понятным для клиента кодом.
+ *
+ * ЗАЧЕМ ОТДЕЛЬНЫЙ КЛАСС
+ * ---------------------
+ * Раньше любая неудача превращалась в голый `500 Internal Server Error`,
+ * и по нему нельзя было понять причину. А причины бывают принципиально
+ * разные, и лечатся они по-разному:
+ *
+ *   * `webhook_conflict` — у бота установлен webhook, и Telegram запрещает
+ *     читать апдейты через `getUpdates`. Лечится снятием webhook;
+ *   * `unauthorized` — токен неверен или отозван. Нужно менять переменную;
+ *   * `network` — Telegram недоступен. Стоит повторить позже.
+ *
+ * Теперь клиент получает код и может показать человеку внятную подсказку.
+ */
+class TelegramSyncError extends Error {
+  constructor(code, message, hint) {
+    super(message);
+    this.name = "TelegramSyncError";
+    this.code = code;
+    this.hint = hint;
+  }
+}
+
 async function syncTelegramUpdates() {
   const updatesUrl = new URL(`${TELEGRAM_API}/getUpdates`);
 
@@ -294,16 +319,79 @@ async function syncTelegramUpdates() {
     JSON.stringify(["message", "channel_post", "edited_channel_post"]),
   );
 
-  const response = await fetch(updatesUrl);
+  let response;
+
+  try {
+    response = await fetch(updatesUrl);
+  } catch (error) {
+    throw new TelegramSyncError(
+      "network",
+      "Не удалось связаться с Telegram",
+      "Проверьте подключение сервера к сети и повторите попытку.",
+    );
+  }
+
+  /*
+   * 409 — САМАЯ ЧАСТАЯ ПРИЧИНА, и раньше она выглядела как загадочный сбой.
+   *
+   * Telegram запрещает одновременно получать апдейты через `getUpdates`
+   * и через webhook: это взаимоисключающие способы. Если webhook установлен
+   * (пусть даже на чужой адрес), чтение возвращает 409.
+   *
+   * Что важно: webhook при этом мог остаться от ПРЕЖНЕГО токена или быть
+   * поставлен другим сервисом. Поэтому сообщаем не только код, но и адрес —
+   * чтобы было видно, куда уходят треки.
+   */
+  if (response.status === 409) {
+    /*
+     * Пробуем выяснить адрес webhook: без этого непонятно, что именно мешает.
+     * Ошибку самой диагностики глотаем — она не должна подменять основную.
+     */
+    let webhookUrl = null;
+
+    try {
+      const infoResponse = await fetch(`${TELEGRAM_API}/getWebhookInfo`);
+      const info = await infoResponse.json();
+      webhookUrl = info?.result?.url || null;
+    } catch {
+      // Не удалось — не страшно, сообщим без адреса.
+    }
+
+    throw new TelegramSyncError(
+      "webhook_conflict",
+      webhookUrl
+        ? `Активен webhook: ${webhookUrl}`
+        : "Активен webhook, установленный другим сервисом",
+      "Telegram не отдаёт апдейты через getUpdates, пока стоит webhook. " +
+        "Снимите его кнопкой ниже — и синхронизация заработает.",
+    );
+  }
+
+  if (response.status === 401 || response.status === 404) {
+    throw new TelegramSyncError(
+      "unauthorized",
+      "Telegram отклонил токен бота",
+      "Проверьте переменную окружения с токеном: возможно, он отозван " +
+        "или вставлен с ошибкой.",
+    );
+  }
 
   if (!response.ok) {
-    throw new Error(`Telegram getUpdates failed: ${response.status}`);
+    throw new TelegramSyncError(
+      "telegram_error",
+      `Telegram ответил ошибкой ${response.status}`,
+      "Обычно это временно — попробуйте повторить через минуту.",
+    );
   }
 
   const data = await response.json();
 
   if (!data.ok) {
-    throw new Error(data.description || "Telegram getUpdates error");
+    throw new TelegramSyncError(
+      "telegram_error",
+      data.description || "Telegram вернул ошибку",
+      "Попробуйте повторить синхронизацию.",
+    );
   }
 
   for (const update of data.result) {
@@ -329,47 +417,85 @@ app.get("/api/telegram/tracks", (req, res) => {
   });
 });
 
+/**
+ * Синхронизация треков из Telegram.
+ *
+ * Возвращает не только успех или неудачу, но и КОД причины. Клиент по нему
+ * показывает понятную подсказку вместо «что-то пошло не так».
+ */
 app.post("/api/telegram/sync", async (req, res) => {
   try {
     const tracks = await syncTelegramUpdates();
 
-    res.json({
-      ok: true,
-      tracks,
-    });
+    res.json({ ok: true, tracks });
   } catch (error) {
-    console.error(error);
+    if (error instanceof TelegramSyncError) {
+      /*
+       * Код 409 для конфликта с webhook: это не «сервер сломался», а
+       * конкретное состояние, которое человек может исправить сам.
+       */
+      const status = error.code === "webhook_conflict" ? 409 : 502;
+
+      console.warn(`[telegram] синхронизация не удалась: ${error.message}`);
+
+      return res.status(status).json({
+        ok: false,
+        code: error.code,
+        message: error.message,
+        hint: error.hint,
+      });
+    }
+
+    console.error("[telegram] непредвиденная ошибка синхронизации:", error);
 
     res.status(500).json({
       ok: false,
-      message: error instanceof Error ? error.message : "Unknown server error",
+      code: "unknown",
+      message: error instanceof Error ? error.message : "Неизвестная ошибка",
+      hint: "Попробуйте повторить. Если не помогает — проверьте логи сервера.",
     });
   }
 });
 
-/* ── Webhook-задел (для деплоя) ────────────────────────────────────────
- * Поллинг остаётся основным режимом локально. На деплое можно вызвать
- * POST /api/telegram/webhook/set — тогда Telegram сам шлёт апдейты на
- * публичный URL, а /api/telegram/webhook их принимает.
+/* ── Управление webhook ────────────────────────────────────────────────
+ *
+ * ЗАЧЕМ ЭТИ ЭНДПОИНТЫ
+ * -------------------
+ * Telegram запрещает одновременно получать апдейты через `getUpdates`
+ * и через webhook — это взаимоисключающие способы. Если webhook установлен,
+ * синхронизация падает с кодом 409, и раньше это выглядело как непонятный
+ * сбой сервера.
+ *
+ * Теперь состояние webhook можно посмотреть и снять прямо из интерфейса,
+ * не заходя в BotFather.
  */
+
+/** Показывает, установлен ли webhook и куда он указывает. */
 app.get("/api/telegram/webhook/info", async (req, res) => {
   try {
     const response = await fetch(`${TELEGRAM_API}/getWebhookInfo`);
     const data = await response.json();
-    res.json({ ok: data.ok, info: data.result ?? null, publicUrl: PUBLIC_URL || null });
+
+    res.json({
+      ok: Boolean(data.ok),
+      info: data.result ?? null,
+      // Наш собственный адрес: по нему видно, совпадает ли webhook с нами.
+      publicUrl: PUBLIC_URL || null,
+    });
   } catch (error) {
-    res.status(500).json({
+    res.status(502).json({
       ok: false,
-      message: error instanceof Error ? error.message : "webhook info error",
+      message: error instanceof Error ? error.message : "getWebhookInfo error",
     });
   }
 });
 
+/** Ставит webhook на наш публичный адрес. */
 app.post("/api/telegram/webhook/set", async (req, res) => {
   if (!PUBLIC_URL) {
     return res.status(400).json({
       ok: false,
-      message: "PUBLIC_URL is not configured in server/.env",
+      message: "PUBLIC_URL не настроен в переменных окружения сервера",
     });
   }
 
@@ -379,22 +505,58 @@ app.post("/api/telegram/webhook/set", async (req, res) => {
       `${TELEGRAM_API}/setWebhook?url=${encodeURIComponent(webhookUrl)}`,
     );
     const data = await response.json();
+
     res.json({ ok: data.ok, description: data.description, webhookUrl });
   } catch (error) {
-    res.status(500).json({
+    res.status(502).json({
       ok: false,
       message: error instanceof Error ? error.message : "setWebhook error",
     });
   }
 });
 
+/**
+ * Снимает webhook, чтобы заработала синхронизация через `getUpdates`.
+ *
+ * ВАЖНО: если webhook указывал на ДРУГОЙ сервис, его владелец перестанет
+ * получать апдейты. Поэтому клиент спрашивает подтверждение перед вызовом,
+ * а мы возвращаем прежний адрес — чтобы было видно, что именно сняли.
+ */
 app.post("/api/telegram/webhook/delete", async (req, res) => {
   try {
+    // Сначала узнаём, что снимаем: это полезно показать в ответе.
+    let previousUrl = null;
+
+    try {
+      const infoResponse = await fetch(`${TELEGRAM_API}/getWebhookInfo`);
+      const info = await infoResponse.json();
+      previousUrl = info?.result?.url || null;
+    } catch {
+      // Не удалось узнать — не мешает снятию.
+    }
+
     const response = await fetch(`${TELEGRAM_API}/deleteWebhook`);
     const data = await response.json();
-    res.json({ ok: data.ok, description: data.description });
+
+    if (!data.ok) {
+      return res.status(502).json({
+        ok: false,
+        message: data.description || "Telegram не снял webhook",
+      });
+    }
+
+    console.log(
+      `[telegram] webhook снят (был: ${previousUrl ?? "не установлен"}), ` +
+        "синхронизация переключена на getUpdates",
+    );
+
+    res.json({
+      ok: true,
+      previousUrl,
+      message: "Webhook снят. Синхронизация работает через getUpdates.",
+    });
   } catch (error) {
-    res.status(500).json({
+    res.status(502).json({
       ok: false,
       message: error instanceof Error ? error.message : "deleteWebhook error",
     });

@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { createSafeStorage } from "../lib/safeStorage";
+
 import type { Locale, LanguagePreference } from "../i18n";
 import { detectBrowserLocale, resolvePreference } from "../i18n";
 
@@ -116,6 +118,7 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: AUTO_KEY,
+      storage: createSafeStorage(),
       partialize: (state) => ({
         languagePreference: state.languagePreference,
         accentPreset: state.accentPreset,

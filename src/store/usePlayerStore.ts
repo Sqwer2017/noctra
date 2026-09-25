@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { createSafeStorage } from "../lib/safeStorage";
+
 import type { PlaylistTrack } from "../types/playlist";
 
 export type PlayMode = "sequence" | "repeat-all" | "repeat-one" | "shuffle";
@@ -363,6 +365,7 @@ export const usePlayerStore = create<PlayerState>()(
     }),
     {
       name: "noctra.player",
+      storage: createSafeStorage(),
       /*
        * Очередь и текущий трек переживают перезагрузку.
        *

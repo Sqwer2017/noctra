@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { createSafeStorage } from "../lib/safeStorage";
+
 import {
   PLAYLIST_MIN_TRACKS,
   XP_PER_LISTEN_SECONDS,
@@ -1137,6 +1139,7 @@ export const useProgressionStore = create<ProgressionState>()(
     }),
     {
       name: "noctra.progression",
+      storage: createSafeStorage(),
       partialize: (state) => ({
         totalXP: state.totalXP,
         totalSecondsListened: state.totalSecondsListened,

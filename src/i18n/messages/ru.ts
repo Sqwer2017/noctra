@@ -483,6 +483,7 @@ const ru = {
   "player.time0": "0:00",
   "player.noSource": "Нет источника аудио",
   "player.loadError": "Не удалось загрузить трек",
+  "player.backgroundPlayback": "Играет в фоне",
   "player.playpause": "Играть / Пауза",
   "player.addToPlaylist": "Добавить трек в плейлист",
   "player.fav.add": "В избранное",

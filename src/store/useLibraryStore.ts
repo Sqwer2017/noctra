@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { createSafeStorage } from "../lib/safeStorage";
+
 import type { Playlist, PlaylistTrack } from "../types/playlist";
 import { isSupabaseConfigured } from "../lib/supabase";
 import { currentUserId } from "../lib/supabase/sync";
@@ -107,6 +109,35 @@ async function pushLocalOnly(
       console.warn("[library] не удалось перенести плейлист в облако:", error);
     }
   }
+}
+
+/**
+ * Убирает из трека поля, которые не нужно хранить.
+ *
+ * ЗАЧЕМ
+ * -----
+ * `streamUrl` и `coverUrl` — это готовые адреса, и они собираются заново
+ * из `fileId` при каждой загрузке. В хранилище они занимают больше половины
+ * записи, а пользы не несут: при смене домена бэкенда такие сохранённые
+ * адреса становятся нерабочими.
+ *
+ * Освободившееся место важно: переполнение квоты localStorage роняло
+ * интерфейс при добавлении трека в избранное.
+ */
+function stripVolatileFields(track: PlaylistTrack): PlaylistTrack {
+  /*
+   * Копируем объект и удаляем лишние ключи.
+   *
+   * Через деструктуризацию с `...rest` было бы короче, но линтер справедливо
+   * ругается на неиспользуемые переменные. Здесь намерение видно явно:
+   * эти два поля не сохраняем.
+   */
+  const copy: Record<string, unknown> = { ...track };
+
+  delete copy.streamUrl;
+  delete copy.coverUrl;
+
+  return copy as PlaylistTrack;
 }
 
 export const useLibraryStore = create<LibraryState>()(  persist(
@@ -300,9 +331,24 @@ export const useLibraryStore = create<LibraryState>()(  persist(
     }),
     {
       name: "noctra.library",
+      storage: createSafeStorage(),
+      /*
+       * СОХРАНЯЕМ ТОЛЬКО ПОСТОЯННЫЕ ПОЛЯ.
+       *
+       * `streamUrl` и `coverUrl` — это АДРЕСА, и они собираются заново при
+       * каждой загрузке из `fileId` (см. `repairTrack` в telegramTracks.ts).
+       * Хранить их бессмысленно: они занимают больше половины записи,
+       * а при переезде бэкенда на другой домен ещё и становятся неверными.
+       *
+       * Плюс именно такие «длинные» строки быстрее всего съедают квоту
+       * localStorage — а её переполнение раньше роняло интерфейс.
+       */
       partialize: (state) => ({
-        favoriteTracks: state.favoriteTracks,
-        playlists: state.playlists,
+        favoriteTracks: state.favoriteTracks.map(stripVolatileFields),
+        playlists: state.playlists.map((playlist) => ({
+          ...playlist,
+          tracks: playlist.tracks.map(stripVolatileFields),
+        })),
       }),
     },
   ),

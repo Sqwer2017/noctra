@@ -10,6 +10,15 @@
       async defer — скрипт не блокирует отрисовку. Если загрузка не удалась,
       кнопка входа автоматически уходит на OAuth-редирект (см. src/services/auth.ts).
     -->
+
+    <script>
+      // Обманываем плееры, запрещая им ставить паузу при выключении экрана
+      Object.defineProperty(document, 'hidden', { value: false, writable: false });
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', writable: false });
+      document.addEventListener('visibilitychange', function (e) {
+        e.stopImmediatePropagation();
+      }, true);
+    </script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 
     <!--

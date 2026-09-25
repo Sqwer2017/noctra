@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+import { createSafeStorage } from "../lib/safeStorage";
+
 import { ACHIEVEMENTS, ACHIEVEMENTS_TOTAL } from "../lib/achievements";
 import type { AchievementDef, AchievementMetrics } from "../lib/achievements";
 import { isSupabaseConfigured } from "../lib/supabase";
@@ -134,6 +136,7 @@ export const useAchievementsStore = create<AchievementsState>()(
     }),
     {
       name: "noctra.achievements",
+      storage: createSafeStorage(),
       /*
        * Храним только `seen` и состояние раскрытия списка.
        * `unlocked` намеренно не персистим: после смены аккаунта в кэше

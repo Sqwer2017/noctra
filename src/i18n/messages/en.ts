@@ -463,6 +463,7 @@ const en = {
   "player.time0": "0:00",
   "player.noSource": "No audio source",
   "player.loadError": "Could not load the track",
+  "player.backgroundPlayback": "Plays in background",
   "player.playpause": "Play / Pause",
   "player.addToPlaylist": "Add current track to playlist",
   "player.fav.add": "Add to favorites",

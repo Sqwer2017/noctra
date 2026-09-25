@@ -20,12 +20,39 @@ const boundElements = new WeakSet<HTMLMediaElement>();
 
 /**
  * Подключает анализатор к аудио-элементу (идемпотентно).
- * Возвращает анализатор или null, если Web Audio недоступен.
+ *
+ * ВАЖНО ПРО КРОСС-ДОМЕННЫЕ ИСТОЧНИКИ
+ * ----------------------------------
+ * `createMediaElementSource` переводит элемент в режим чтения данных через
+ * Web Audio, а для этого браузер ТРЕБУЕТ строгий CORS: сервер потока обязан
+ * прислать `Access-Control-Allow-Origin`.
+ *
+ * У наших источников (Telegram, прокси) заголовок есть. А у прямых ссылок
+ * `googlevideo`, которые отдаёт нативный резолвер YouTube, его нет — и попытка
+ * подключить анализатор к такому элементу ломает воспроизведение целиком:
+ * браузер отвечает `MEDIA_ELEMENT_ERROR` и трек не играет.
+ *
+ * Поэтому для YouTube анализатор не подключаем: визуализация уйдёт в режим
+ * имитации (он уже предусмотрен), зато звук работает.
+ *
+ * @param element Аудио-элемент.
+ * @param allowCrossOrigin `false` для источников без CORS-заголовков.
+ * @returns Анализатор или `null`, если подключить не удалось.
  */
 export function attachAnalyser(
   element: HTMLMediaElement,
+  allowCrossOrigin = true,
 ): AnalyserNode | null {
   if (entry) return entry.analyser;
+
+  /*
+   * Источник без CORS — анализатор не подключаем.
+   *
+   * Проверяем ДО создания AudioContext: сам факт вызова
+   * `createMediaElementSource` для такого элемента уже ломает
+   * воспроизведение, откатить это нельзя.
+   */
+  if (!allowCrossOrigin) return null;
 
   const AudioContextCtor =
     window.AudioContext ??
