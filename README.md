@@ -222,6 +222,13 @@ For larger changes, please open an issue to discuss the proposal before
 starting implementation. **Never post API keys, tokens, passwords, or
 other secrets in public issues.**
 
+## Code signing policy
+
+Free code signing provided by SignPath.io, certificate by SignPath Foundation.
+Noctra is solo-maintained; the maintainer holds the Author, Reviewer, and
+Signing Approver roles. See [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md)
+and [PRIVACY.md](PRIVACY.md).
+
 ## Credits & license
 
 Noctra is built on the open-source project
