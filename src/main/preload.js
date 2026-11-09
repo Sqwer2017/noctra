@@ -55,6 +55,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   resetDownloadDir: () => ipcRenderer.invoke('set-download-dir', { reset: true }),
   restartApp: () => ipcRenderer.send('restart-app'),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  devOpenSource: (payload) => ipcRenderer.invoke('dev-open-source', payload),
+  devOpenDevtools: () => ipcRenderer.send('dev-open-devtools'),
   checkForUpdates: () => ipcRenderer.invoke('update-check'),
   updateAction: (action) => ipcRenderer.send('update-action', action),
   installUpdateNow: () => {

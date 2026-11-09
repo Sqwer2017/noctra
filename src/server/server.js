@@ -1189,7 +1189,7 @@ async function httpGetJson(url, timeoutMs = 6000, extraHeaders = {}) {
     try {
       const parsed = new URL(url);
       const mod = parsed.protocol === 'http:' ? http : https;
-      const headers = Object.assign({ 'User-Agent': 'Riff' }, extraHeaders);
+      const headers = Object.assign({ 'User-Agent': 'Noctra' }, extraHeaders);
       const req = mod.get(url, { family: 4, headers, timeout: timeoutMs }, (res) => {
         if (res.statusCode < 200 || res.statusCode >= 300) {
           res.resume();
@@ -3218,7 +3218,7 @@ async function checkNetConnectivity() {
         method: 'HEAD',
         timeout: 3500,
         family: 4,
-        headers: { 'User-Agent': 'Riff' }
+        headers: { 'User-Agent': 'Noctra' }
       }, (res) => {
         res.resume();
         resolve(res.statusCode >= 200 && res.statusCode < 400);
@@ -8298,7 +8298,7 @@ async function getSpotifyAccessToken(forceRefresh = false) {
       spotifyAuthError = '';
       if (typeof result.data.refresh_token === 'string' && result.data.refresh_token) {
         spotifyAuth.refreshToken = result.data.refresh_token;
-        if (!saveSpotifyAuth()) spotifyAuthError = 'Spotify login could not be saved securely; reconnect after restarting Riff.';
+        if (!saveSpotifyAuth()) spotifyAuthError = 'Spotify login could not be saved securely; reconnect after restarting Noctra.';
       }
       return spotifyAuth.token;
     })().finally(() => { spotifyRefreshPromise = null; });
@@ -8598,7 +8598,7 @@ async function callDeepLTranslate(text, toLang, apiKey = '') {
     const googleResult = await queryGoogleTranslateFallback(safeText, toLang);
     const gArr = Array.isArray(googleResult) ? googleResult : (typeof googleResult === 'string' ? googleResult.split('\n') : null);
     if (gArr) {
-      return gArr.map(str => { const s = String(str || '').replace(/__RIFF_BRAND__/g, 'Riff').replace(/__RIFF_APP__/g, 'Riff').trim(); return (!s || s.includes('linux.do') || /https?:\/\//i.test(s)) ? '' : s; });
+      return gArr.map(str => { const s = String(str || '').replace(/__RIFF_BRAND__/g, 'Noctra').replace(/__RIFF_APP__/g, 'Noctra').trim(); return (!s || s.includes('linux.do') || /https?:\/\//i.test(s)) ? '' : s; });
     }
     return null;
   }
@@ -8618,7 +8618,7 @@ async function callDeepLTranslate(text, toLang, apiKey = '') {
 
   const resArr = Array.isArray(results) ? results : (typeof results === 'string' ? results.split('\n') : null);
   if (resArr) {
-    return resArr.map(str => { const s = String(str || '').replace(/__RIFF_BRAND__/g, 'Riff').replace(/__RIFF_APP__/g, 'Riff').trim(); return (!s || s.includes('linux.do') || /https?:\/\//i.test(s)) ? '' : s; });
+    return resArr.map(str => { const s = String(str || '').replace(/__RIFF_BRAND__/g, 'Noctra').replace(/__RIFF_APP__/g, 'Noctra').trim(); return (!s || s.includes('linux.do') || /https?:\/\//i.test(s)) ? '' : s; });
   }
   return null;
 }
@@ -9171,8 +9171,8 @@ async function handleHotPicks(req, res, parsedUrl) {
   }
 }
 
-const DEFAULT_LFM_KEY = '4b4f73bda181868353f9b438604adf52';
-const DEFAULT_LFM_SECRET = '716cc0a784bb62835de5bd674e65eb57';
+const DEFAULT_LFM_KEY = process.env.NOCTRA_LASTFM_API_KEY || '4b4f73bda181868353f9b438604adf52';
+const DEFAULT_LFM_SECRET = process.env.NOCTRA_LASTFM_API_SECRET || '716cc0a784bb62835de5bd674e65eb57';
 
 function signLastFmParams(params, secret) {
   const keys = Object.keys(params).filter(k => k !== 'format' && k !== 'callback').sort();
@@ -9196,8 +9196,8 @@ function callLastFmApi(params, secret, method = 'POST') {
       hostname: 'ws.audioscrobbler.com',
       path: reqPath,
       method,
-      headers: isGet ? { 'User-Agent': 'Riff-Desktop-Player/43.0' } : {
-        'User-Agent': 'Riff-Desktop-Player/43.0',
+      headers: isGet ? { 'User-Agent': 'Noctra-Desktop-Player/0.1.0' } : {
+        'User-Agent': 'Noctra-Desktop-Player/0.1.0',
         'Content-Type': 'application/x-www-form-urlencoded',
         'Content-Length': Buffer.byteLength(bodyData)
       },
@@ -9860,7 +9860,7 @@ async function requestHandler(req, res) {
       spotifyAuthError = errParam === 'access_denied' ? 'Spotify authorization was denied.' : 'Spotify login failed. Check the Client ID, allowed account and redirect URI.';
       spotifyAuth.state = '';
       res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
-      return res.end('<!DOCTYPE html><html><body><p>Spotify login failed. Return to Riff for details.</p></body></html>');
+      return res.end('<!DOCTYPE html><html><body><p>Spotify login failed. Return to Noctra for details.</p></body></html>');
     }
     const redirectUri = getSpotifyRedirectUri();
     try {
@@ -9868,7 +9868,7 @@ async function requestHandler(req, res) {
       const tokenResult = await requestSpotifyToken({ grant_type: 'authorization_code', code, redirect_uri: redirectUri, client_id: spotifyAuth.clientId, code_verifier: spotifyAuth.verifier });
       if (spotifyAuth !== session) {
         res.writeHead(409, { 'Content-Type': 'text/html; charset=utf-8' });
-        return res.end('<!DOCTYPE html><html><body><p>Spotify login session changed. Return to Riff and try again.</p></body></html>');
+        return res.end('<!DOCTYPE html><html><body><p>Spotify login session changed. Return to Noctra and try again.</p></body></html>');
       }
       spotifyAuth.state = '';
       if (tokenResult.status >= 200 && tokenResult.status < 300 && typeof tokenResult.data?.access_token === 'string' && tokenResult.data.access_token) {
@@ -9876,20 +9876,20 @@ async function requestHandler(req, res) {
         spotifyAuth.refreshToken = typeof tokenResult.data.refresh_token === 'string' ? tokenResult.data.refresh_token : '';
         spotifyAuth.expiresAt = Date.now() + (Number.isFinite(tokenResult.data.expires_in) && tokenResult.data.expires_in > 0 ? tokenResult.data.expires_in : 3600) * 1000;
         if (!spotifyAuth.refreshToken) spotifyAuthError = 'Spotify did not provide a refresh token; reconnect when this session expires.';
-        else if (!saveSpotifyAuth()) spotifyAuthError = 'Spotify login could not be saved securely; reconnect after restarting Riff.';
+        else if (!saveSpotifyAuth()) spotifyAuthError = 'Spotify login could not be saved securely; reconnect after restarting Noctra.';
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        return res.end('<!DOCTYPE html><html><body><p>Riff is connected to Spotify. You can close this tab.</p></body></html>');
+        return res.end('<!DOCTYPE html><html><body><p>Noctra is connected to Spotify. You can close this tab.</p></body></html>');
       } else {
         const reason = tokenResult.data?.error_description || tokenResult.data?.error || `HTTP ${tokenResult.status}`;
         spotifyAuthError = `Spotify token exchange failed: ${reason}`;
         res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
-        return res.end('<!DOCTYPE html><html><body><p>Spotify login failed. Return to Riff for details.</p></body></html>');
+        return res.end('<!DOCTYPE html><html><body><p>Spotify login failed. Return to Noctra for details.</p></body></html>');
       }
     } catch (err) {
       spotifyAuth.state = '';
       spotifyAuthError = `Could not reach Spotify: ${err.message}`;
       res.writeHead(500, { 'Content-Type': 'text/html; charset=utf-8' });
-      return res.end('<!DOCTYPE html><html><body><p>Spotify login failed. Return to Riff for details.</p></body></html>');
+      return res.end('<!DOCTYPE html><html><body><p>Spotify login failed. Return to Noctra for details.</p></body></html>');
     }
   }
 

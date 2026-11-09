@@ -12,17 +12,42 @@ if (process.platform === 'darwin') {
   process.env.PATH = parts.join(':');
 }
 
-const DEFAULT_DATA_DIR = IS_WIN
+function migrateLegacyDir(legacyDir, currentDir) {
+  if (process.env.NOCTRA_SKIP_MIGRATION === '1' || process.env.RIFF_DATA_DIR) return currentDir;
+  if (fs.existsSync(currentDir)) return currentDir;
+  if (!fs.existsSync(legacyDir)) return currentDir;
+  try {
+    fs.renameSync(legacyDir, currentDir);
+    return currentDir;
+  } catch (e) {
+    return legacyDir;
+  }
+}
+
+const DATA_BASE = IS_WIN
+  ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Noctra')
+  : process.platform === 'darwin'
+  ? path.join(os.homedir(), 'Library', 'Application Support', 'Noctra')
+  : path.join(os.homedir(), '.cache', 'noctra');
+const LEGACY_DATA_BASE = IS_WIN
   ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Riff')
   : process.platform === 'darwin'
   ? path.join(os.homedir(), 'Library', 'Application Support', 'Riff')
   : path.join(os.homedir(), '.cache', 'devsize');
+const DEFAULT_DATA_DIR = migrateLegacyDir(LEGACY_DATA_BASE, DATA_BASE);
 
-const CONFIG_DIR = IS_WIN
-  ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Riff')
-  : process.platform === 'darwin'
-  ? path.join(os.homedir(), 'Library', 'Application Support', 'Riff')
-  : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'devsize');
+const CONFIG_DIR = migrateLegacyDir(
+  IS_WIN
+    ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Riff')
+    : process.platform === 'darwin'
+    ? path.join(os.homedir(), 'Library', 'Application Support', 'Riff')
+    : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'devsize'),
+  IS_WIN
+    ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Noctra')
+    : process.platform === 'darwin'
+    ? path.join(os.homedir(), 'Library', 'Application Support', 'Noctra')
+    : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'noctra')
+);
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json');
 
 function readConfig() {

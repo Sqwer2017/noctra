@@ -3,12 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Riff</title>
+  <title>Noctra</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Google+Sans+Text:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&family=Material+Symbols+Sharp:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" />
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="profile.css">
   <script>if (/Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || '')) document.documentElement.classList.add('platform-darwin');</script>
   <style id="tg-account-critical-css">
   #settings-nav-account.settings-account-nav-btn {
@@ -17,7 +18,8 @@
     max-height: 48px !important;
     padding: 0 12px !important;
     gap: 10px !important;
-    margin-top: auto !important;
+    margin-top: 0 !important;
+    margin-bottom: 4px !important;
     display: flex !important;
     align-items: center !important;
     justify-content: flex-start !important;
@@ -86,8 +88,8 @@
     height: 22px !important;
     display: block !important;
     background-color: rgba(0, 0, 0, 0.24) !important;
-    -webkit-mask: url('../../assets/riff.svg') no-repeat center / contain !important;
-    mask: url('../../assets/riff.svg') no-repeat center / contain !important;
+    -webkit-mask: url('../../assets/noctra-mark.png') no-repeat center / contain !important;
+    mask: url('../../assets/noctra-mark.png') no-repeat center / contain !important;
     pointer-events: none !important;
   }
   .tg-pat-icon.p1  { top: 10%; left: 21%; transform: rotate(-14deg) scale(0.95); opacity: 0.72; }
@@ -257,8 +259,8 @@
     height: 100% !important;
     display: block !important;
     background-color: #ffffff !important;
-    -webkit-mask: url('../../assets/riff.svg') no-repeat center / contain !important;
-    mask: url('../../assets/riff.svg') no-repeat center / contain !important;
+    -webkit-mask: url('../../assets/noctra-mark.png') no-repeat center / contain !important;
+    mask: url('../../assets/noctra-mark.png') no-repeat center / contain !important;
   }
   .acc-satellite-btn {
     position: absolute !important;
@@ -342,7 +344,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
 
   <header class="titlebar" id="titlebar">
     <div class="titlebar-drag">
-      <div class="app-logo" aria-label="Riff"><span class="titlebar-riff-icon"></span></div>
+      <div class="app-logo" aria-label="Noctra"><span class="titlebar-riff-icon"></span></div>
     </div>
     <div class="titlebar-controls window-controls">
       <button class="titlebar-btn win-btn" id="btn-mini-lyrics" title="Lyrics" aria-label="Lyrics">
@@ -383,9 +385,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
         </button>
       </div>
-    </div>
-
-    <div class="platform-switch-container">
+      <div class="platform-switch-container">
       <div class="platform-pill-switch">
         <button class="platform-btn" data-platform="youtube" id="platform-yt" title="YouTube">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -407,6 +407,19 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
         </button>
       </div>
     </div>
+    </div>
+
+    <div class="top-window-controls" id="top-window-controls">
+      <button type="button" class="top-window-btn" id="btn-top-window-minimize" title="Minimize" aria-label="Minimize">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+      </button>
+      <button type="button" class="top-window-btn" id="btn-top-window-maximize" title="Maximize" aria-label="Maximize">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"></rect></svg>
+      </button>
+      <button type="button" class="top-window-btn is-close" id="btn-top-window-close" title="Close" aria-label="Close">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+    </div>
   </div>
 
   <div class="app-layout">
@@ -417,10 +430,10 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
 
         <button class="nav-item active" data-view="discover" id="nav-discover" title="Home">
           <div class="nav-indicator">
-            <img id="nav-home-app-icon" class="nav-home-app-icon" src="../../assets/02-editor.svg" alt="Home" draggable="false" />
+            <img id="nav-home-app-icon" class="nav-home-app-icon" src="../../assets/icon.png" alt="Home" draggable="false" />
           </div>
           <div class="sb-home-banner-content">
-            <span class="sb-home-banner-title" data-i18n-fixed>Riff</span>
+            <span class="sb-home-banner-title" data-i18n-fixed>Noctra</span>
             <div class="sb-split-radio-btn" id="btn-sb-banner-radio" role="button" tabindex="0" title="For you">
               <div class="sb-split-radio-cover">
                 <div class="sb-split-radio-grid" id="sb-split-radio-grid">
@@ -443,6 +456,13 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
           </div>
         </button>
 
+        <button class="nav-item nav-profile-item" data-view="profile" id="nav-profile" title="Profile">
+          <div class="nav-indicator">
+            <img class="nav-profile-avatar" id="nav-profile-avatar" src="../../assets/icon.png" alt="" draggable="false">
+          </div>
+          <span class="nav-item-label" id="nav-profile-label">Profile</span>
+        </button>
+
         <button class="nav-item" data-view="favorites" id="nav-favorites" title="Favorites">
           <div class="nav-indicator">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -460,14 +480,13 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
           <span class="nav-item-label" data-i18n>Albums</span>
         </button>
 
-        <button class="nav-item" data-view="local" id="nav-local" title="My files">
+        <button class="nav-item" id="btn-toggle-playlists-drawer" title="Playlists" aria-label="Playlists">
           <div class="nav-indicator">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+              <path d="M21 15V6M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM12 12H3M16 6H3M12 18H3"></path>
             </svg>
-            <span class="nav-badge" id="local-count">0</span>
           </div>
-          <span class="nav-item-label" data-i18n>My files</span>
+          <span class="nav-item-label" data-i18n>Playlists</span>
         </button>
 
         <button class="nav-item" data-view="history" id="nav-history" title="History">
@@ -505,10 +524,11 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
               <line x1="17" y1="16" x2="23" y2="16"></line>
             </svg>
           </button>
-          <button class="rail-icon-btn" id="btn-toggle-playlists-drawer" title="Playlists">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15V6M18.5 18a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM12 12H3M16 6H3M12 18H3"></path>
+          <button class="rail-icon-btn" id="nav-local" title="My files" aria-label="My files">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
             </svg>
+            <span class="nav-badge" id="local-count">0</span>
           </button>
         </div>
 
@@ -670,13 +690,22 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                 </div>
               </div>
 
+              <div class="section-block home-pane carousel-random-pane" id="carousel-random-sec" hidden>
+                <div class="home-pane-header carousel-random-header">
+                  <span class="home-pane-label" data-i18n-fixed>Случайный артист</span>
+                  <button class="btn-icon-pill" id="btn-carousel-random-reroll" type="button" title="Другой артист" aria-label="Другой артист">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7v5h-5"/><path d="M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 11.6-2L20 12M4 12l2.8 5a7 7 0 0 0 11.6-2"/></svg>
+                  </button>
+                </div>
+                <div class="carousel-random-card" id="carousel-random"></div>
+              </div>
             </div>
             <div class="home-hero-dots" id="home-hero-dots"></div>
           </div>
           <div class="sp-home" id="sp-home"><div class="spotify-promo hidden" id="spotify-promo" hidden>
   <div class="riff-orbit-stage" aria-hidden="true">
     <div class="riff-orbit-path"></div>
-    <img class="riff-orbit-center" src="../../assets/riff.svg" width="56" height="56" alt="Riff" draggable="false">
+    <img class="riff-orbit-center" src="../../assets/noctra-mark-white.png" width="56" height="56" alt="Noctra" draggable="false">
     <div class="riff-orbit-ring">
       <div class="riff-orbit-item" style="transform: rotate(0deg) translateY(-70px) rotate(0deg);">
         <img class="riff-orbit-logo" src="https://cdn.simpleicons.org/spotify/1ED760" width="32" height="32" loading="lazy" alt="Spotify" onerror="this.style.display='none'" style="transform: rotate(0deg) translateY(-70px) rotate(0deg);">
@@ -703,7 +732,8 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
   <button type="button" class="btn-icon-pill spotify-promo-close" id="btn-spotify-promo-close" aria-label="Dismiss">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
   </button>
-</div><section class="sp-section" id="sp-made-sec"><h2><svg class="sp-ico" viewBox="0 0 24 24"><path d="M4 10a1 1 0 0 1 1 1v2a1 1 0 0 1-2 0v-2a1 1 0 0 1 1-1zm4-4a1 1 0 0 1 1 1v10a1 1 0 1 1-2 0V7a1 1 0 0 1 1-1zm4-4a1 1 0 0 1 1 1v18a1 1 0 1 1-2 0V3a1 1 0 0 1 1-1zm4 4a1 1 0 0 1 1 1v10a1 1 0 1 1-2 0V7a1 1 0 0 1 1-1zm4 4a1 1 0 0 1 1 1v2a1 1 0 1 1-2 0v-2a1 1 0 0 1 1-1z"/></svg><span data-i18n>For you</span><button class="btn-icon-pill" id="btn-regen-mixes" aria-label="Regenerate mixes" title="Regenerate mixes" style="margin-left: auto; width: 32px; height: 32px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg></button></h2><div class="sp-row" id="sp-made"></div></section><section class="sp-section" id="sp-quick-sec"><h2><svg class="sp-ico" viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg><span data-i18n>Home</span></h2><div class="sp-quick" id="sp-quick"></div></section><section class="sp-section" id="sp-trend-sec"><h2><svg class="sp-ico" viewBox="0 0 24 24"><path d="M12 2c1 4 5 5.5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 0 2 1 3 2 3 0-3-1-6 1-9z"/></svg><span data-i18n>Trending now</span></h2><div class="sp-row" id="sp-trend"></div></section><section class="sp-section" id="sp-artists-sec"><h2><svg class="sp-ico" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg><span data-i18n>Favorite artists</span></h2><div class="sp-row fav-artists-row" id="sp-artists"></div></section></div>
+</div>
+<section class="sp-section" id="sp-quick-home-sec"><h2><svg class="sp-ico" viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg><span data-i18n>Home</span></h2><div class="sp-quick" id="sp-quick-home"></div></section><section class="sp-section" id="sp-made-sec"><h2><svg class="sp-ico" viewBox="0 0 24 24"><path d="M4 10a1 1 0 0 1 1 1v2a1 1 0 0 1-2 0v-2a1 1 0 0 1 1-1zm4-4a1 1 0 0 1 1 1v10a1 1 0 1 1-2 0V7a1 1 0 0 1 1-1zm4-4a1 1 0 0 1 1 1v18a1 1 0 1 1-2 0V3a1 1 0 0 1 1-1zm4 4a1 1 0 0 1 1 1v10a1 1 0 1 1-2 0V7a1 1 0 0 1 1-1zm4 4a1 1 0 0 1 1 1v2a1 1 0 1 1-2 0v-2a1 1 0 0 1 1-1z"/></svg><span data-i18n>Just for you</span><span class="sp-section-nick" id="sp-made-nick"></span><button class="btn-icon-pill" id="btn-regen-mixes" aria-label="Regenerate mixes" title="Regenerate mixes" style="margin-left: auto; width: 32px; height: 32px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg></button></h2><div class="sp-row" id="sp-made"></div></section><section class="sp-section" id="sp-listen-sec"><h2><svg class="sp-ico" viewBox="0 0 24 24"><path d="M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.79 1.42-1.41zM4 10.5H1v2h3v-2zm9-9.95h-2V3.5h2V.55zm7.45 3.91l-1.41-1.41-1.79 1.79 1.41 1.41 1.79-1.79zm-3.21 13.7l1.79 1.8 1.41-1.41-1.8-1.79-1.4 1.4zM20 10.5v2h3v-2h-3zm-8-5c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6-2.69-6-6-6zm-1 16.95h2V19.5h-2v2.95zm-7.45-3.91l1.41 1.41 1.79-1.8-1.41-1.41-1.79 1.8z"/></svg><span data-i18n>Listen today</span></h2><div class="sp-row" id="sp-listen"></div></section><section class="sp-section" id="sp-quick-sec"><h2><svg class="sp-ico" viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg><span data-i18n>Recently played</span></h2><div class="sp-row" id="sp-quick"></div></section><section class="sp-section" id="sp-random-sec"><div id="sp-random"></div></section><section class="sp-section" id="sp-trend-sec"><h2><svg class="sp-ico" viewBox="0 0 24 24"><path d="M12 2c1 4 5 5.5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 0 2 1 3 2 3 0-3-1-6 1-9z"/></svg><span data-i18n>Trending now</span></h2><div class="sp-row" id="sp-trend"></div></section><section class="sp-section" id="sp-artists-sec"><h2><svg class="sp-ico" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg><span data-i18n>Favorite artists</span></h2><div class="sp-row fav-artists-row" id="sp-artists"></div></section></div>
           </div>
         </div>
 
@@ -968,6 +998,10 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
         </div>
       </section>
 
+      <section class="content-view" id="view-profile">
+        <div class="riff-profile" id="profile-root"></div>
+      </section>
+
       <section class="content-view" id="view-settings">
         <div class="settings-view">
           <h2 class="section-title">Settings</h2>
@@ -979,6 +1013,13 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
             <input type="text" id="settings-search-input" placeholder="Search settings..." data-i18n-attr="placeholder" autocomplete="off">
             <button type="button" class="search-clear-btn hidden" id="settings-search-clear" title="Clear"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
           </div>
+              <button class="settings-nav-btn settings-account-nav-btn" data-cat="account" id="settings-nav-account" type="button">
+                <img id="settings-nav-avatar" class="settings-nav-avatar" src="../../assets/icon.png" alt="" draggable="false" />
+                <div class="settings-nav-account-meta">
+                  <span class="settings-nav-account-name" id="settings-nav-account-name" data-i18n-fixed>User</span>
+                  <span class="settings-nav-account-sub" data-i18n>Account</span>
+                </div>
+              </button>
               <button class="settings-nav-btn" data-cat="interface">
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
@@ -1045,6 +1086,15 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                 </svg>
                 <span data-i18n>Advanced</span>
               </button>
+              <button class="settings-nav-btn hidden" data-cat="developer" id="settings-nav-developer" title="Для разработчиков">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="m8 9-4 3 4 3"/>
+                  <path d="m16 9 4 3-4 3"/>
+                  <path d="m14 6-4 12"/>
+                </svg>
+                <span data-i18n-fixed>Разработчику</span>
+                <span class="riff-beta-badge" style="margin-left:auto;">NEW</span>
+              </button>
               <button class="settings-nav-btn" data-cat="about">
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <circle cx="12" cy="12" r="10"/>
@@ -1062,13 +1112,6 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                 <span data-i18n>Plugins</span>
               </button>
               <div style="flex: 1 1 auto; min-height: 12px;"></div>
-              <button class="settings-nav-btn settings-account-nav-btn" data-cat="account" id="settings-nav-account" type="button">
-                <img id="settings-nav-avatar" class="settings-nav-avatar" src="../../assets/icon.png" alt="" draggable="false" />
-                <div class="settings-nav-account-meta">
-                  <span class="settings-nav-account-name" id="settings-nav-account-name" data-i18n-fixed>User</span>
-                  <span class="settings-nav-account-sub" data-i18n>Account</span>
-                </div>
-              </button>
             </nav>
             <div class="settings-pane">
               <div class="settings-section" data-cat="interface">
@@ -1148,6 +1191,19 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                   <span style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline);" data-i18n>Use VAGRoundedLTCYR-Black on Now Playing and TV karaoke titles</span>
                 </div>
                 <button class="effect-switch-btn active" id="btn-art-font"><span class="thumb"></span></button>
+              </div>
+            </div>
+
+            <div class="setting-item" id="setting-profile-bg-row">
+              <div class="setting-item-top" style="align-items: center;">
+                <div style="display: flex; flex-direction: column; gap: 2px;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="setting-name" data-i18n>Live background</span>
+                    <span class="riff-beta-badge">NEW</span>
+                  </div>
+                  <span class="setting-hint" data-i18n>Full-screen light flares and particles behind the interface</span>
+                </div>
+                <button class="effect-switch-btn active" id="btn-profile-bg-effects"><span class="thumb"></span></button>
               </div>
             </div>
 
@@ -1552,8 +1608,8 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                   <div style="display: flex; flex-direction: column; gap: 4px;">
                     <div class="settings-section-title">Custom themes</div>
                     <div style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-on-surface-variant); font-weight: normal; line-height: 1.4;">
-                      Add a .css file to restyle Riff.<br>
-                      Tip: Riff sets its color variables from JavaScript, so a theme must use !important to override them (for example --md-sys-color-primary: #ff4081 !important).<br>
+                      Add a .css file to restyle Noctra.<br>
+                      Tip: Noctra sets its color variables from JavaScript, so a theme must use !important to override them (for example --md-sys-color-primary: #ff4081 !important).<br>
                       Ctrl+Shift+R turns every custom theme and CSS off if something breaks.
                     </div>
                   </div>
@@ -1563,12 +1619,13 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
               </div>
 
               <div class="settings-section" data-cat="plugins">
-                <div class="ct-head"><div><div class="settings-section-title">Plugins</div><div class="setting-hint"><span class="plugins-warn">Plugins are JavaScript files with full access to Riff.</span> Only add plugins you trust. They live in the plugins folder: delete a file and the plugin is gone. Ctrl+Shift+R turns every plugin off.</div></div><div class="ct-actions"><button class="btn-outline-pill" id="btn-plugins-folder">Open folder</button><button class="btn-outline-pill" id="btn-plugins-reload">Reload list</button><button class="btn-pill-primary" id="btn-add-plugin">Add</button></div></div>
+                <div class="ct-head"><div><div class="settings-section-title">Plugins</div><div class="setting-hint"><span class="plugins-warn">Plugins are JavaScript files with full access to Noctra.</span> Only add plugins you trust. They live in the plugins folder: delete a file and the plugin is gone. Ctrl+Shift+R turns every plugin off.</div></div><div class="ct-actions"><button class="btn-outline-pill" id="btn-plugins-folder">Open folder</button><button class="btn-outline-pill" id="btn-plugins-reload">Reload list</button><button class="btn-pill-primary" id="btn-add-plugin">Add</button></div></div>
                 <div class="ct-list m3-group" id="plugins-list"></div>
               </div>
 
               <div class="settings-section cat-hidden" data-cat="account" id="settings-section-account">
                 <div class="tg-account-hero" id="tg-account-hero">
+                  <div class="tg-account-fx" id="tg-account-fx" aria-hidden="true"></div>
                   <div class="tg-account-pattern" aria-hidden="true">
                     <span class="tg-pat-icon p1"></span>
                     <span class="tg-pat-icon p2"></span>
@@ -1580,7 +1637,6 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                     <span class="tg-pat-icon p8"></span>
                     <span class="tg-pat-icon p9"></span>
                     <span class="tg-pat-icon p10"></span>
-                    <img id="tg-easter-meme" class="tg-pat-meme" alt="" title="Meow! Click me" draggable="false" />
                   </div>
                   <div class="tg-account-center">
                     <div class="account-avatar-picker" id="btn-pick-account-avatar" title="Click to change avatar">
@@ -1611,7 +1667,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                   <div class="setting-item">
                     <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
                       <div style="display: flex; flex-direction: column; gap: 2px;">
-                        <span class="setting-name" data-i18n>Export Riff account (.rfacc)</span>
+                        <span class="setting-name" data-i18n>Export Noctra account (.rfacc)</span>
                         <span class="setting-hint" data-i18n>Save your profile, playlists, favorites, history, and settings to a file</span>
                       </div>
                       <button type="button" class="btn-pill-primary acc-btn" id="btn-acc-export-rfacc" data-i18n>
@@ -1623,8 +1679,8 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                   <div class="setting-item">
                     <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
                       <div style="display: flex; flex-direction: column; gap: 2px;">
-                        <span class="setting-name" data-i18n>Import Riff account (.rfacc)</span>
-                        <span class="setting-hint" data-i18n>Restore your entire Riff account from a .rfacc backup file</span>
+                        <span class="setting-name" data-i18n>Import Noctra account (.rfacc)</span>
+                        <span class="setting-hint" data-i18n>Restore your entire Noctra account from a .rfacc backup file</span>
                       </div>
                       <button type="button" class="btn-outline-pill acc-btn" id="btn-acc-import-rfacc" data-i18n>
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -1645,7 +1701,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
 
                       
                       <div class="acc-orbital-widget" id="acc-orbital-widget">
-                        <div class="acc-orbital-center" title="Riff Core">
+                        <div class="acc-orbital-center" title="Noctra Core">
                           <span class="acc-orbital-riff-icon"></span>
                         </div>
 
@@ -2339,7 +2395,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
               <div class="setting-item-top" style="align-items: center;">
                 <div style="display: flex; flex-direction: column; gap: 2px;">
                   <span class="setting-name" data-i18n>Show artist in Discord status</span>
-                  <span class="setting-hint" data-i18n>Display "Listening to Artist" instead of "Listening to Riff" in compact profile status</span>
+                  <span class="setting-hint" data-i18n>Display "Listening to Artist" instead of "Listening to Noctra" in compact profile status</span>
                 </div>
                 <button type="button" class="effect-switch-btn active" id="btn-discord-artist-status"><span class="thumb"></span></button>
               </div>
@@ -2472,6 +2528,24 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
               </div>
             </div>
 
+            <div class="setting-item" id="refresh-track-covers-item">
+              <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--md-sys-color-surface-container-high); display: flex; align-items: center; justify-content: center; color: var(--md-sys-color-primary);">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                  </div>
+                  <div style="display: flex; flex-direction: column;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <span class="setting-name" data-i18n>Refresh track covers</span>
+                      <span class="riff-beta-badge">NEW</span>
+                    </div>
+                    <span style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline);" data-i18n>Fetch missing artwork for imported tracks</span>
+                  </div>
+                </div>
+                <button class="btn-pill-primary" id="btn-refresh-track-covers" type="button" style="padding: 6px 14px; font-size: calc(12px * var(--font-scale, 1));" data-i18n>Refresh</button>
+              </div>
+            </div>
+
             <div class="setting-item" id="tools-row">
               <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
                 <div style="display: flex; align-items: center; gap: 12px;">
@@ -2573,7 +2647,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                   </div>
                   <div style="display: flex; flex-direction: column;">
-                    <span class="setting-name">Export Riff account (.rfacc)</span>
+                    <span class="setting-name">Export Noctra account (.rfacc)</span>
                     <span style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline);">Backup full library, playlists, settings and history</span>
                   </div>
                 </div>
@@ -2588,7 +2662,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                   </div>
                   <div style="display: flex; flex-direction: column;">
-                    <span class="setting-name">Import Riff account (.rfacc)</span>
+                    <span class="setting-name">Import Noctra account (.rfacc)</span>
                     <span style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline);">Restore entire account from encrypted binary backup</span>
                   </div>
                 </div>
@@ -2625,7 +2699,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                       <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
                         <div style="display: flex; flex-direction: column; gap: 2px;">
                           <span class="setting-name">Create desktop & app menu shortcut</span>
-                          <span class="setting-hint">Add Riff shortcut to your desktop and system applications menu</span>
+                          <span class="setting-hint">Add Noctra shortcut to your desktop and system applications menu</span>
                         </div>
                         <button type="button" class="btn-outline-pill" id="btn-create-shortcut" style="height: 32px; padding: 0 14px; font-size: 13px;">Create shortcut</button>
                       </div>
@@ -2654,7 +2728,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                       <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
                         <div style="display: flex; flex-direction: column; gap: 2px;">
                           <span class="setting-name" data-i18n>In-app proxy (YouTube / SoundCloud bypass)</span>
-                          <span class="setting-hint" data-i18n>Route Riff audio and stream extraction through a proxy without slowing down your whole system</span>
+                          <span class="setting-hint" data-i18n>Route Noctra audio and stream extraction through a proxy without slowing down your whole system</span>
                         </div>
                         <button class="effect-switch-btn" id="btn-proxy-enable" type="button" title="Enable in-app proxy"><span class="thumb"></span></button>
                       </div>
@@ -2724,7 +2798,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                     <div class="setting-item-top" style="align-items: center;">
                       <div style="display: flex; flex-direction: column; gap: 2px;">
                         <span class="setting-name">Allow multiple instances</span>
-                        <span style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline);">For testing: lets you start a second Riff window. Applies after restart. The second window uses its own clean profile.</span>
+                        <span style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline);">For testing: lets you start a second Noctra window. Applies after restart. The second window uses its own clean profile.</span>
                       </div>
                       <button class="effect-switch-btn" id="btn-multi-instance"><span class="thumb"></span></button>
                     </div>
@@ -2734,7 +2808,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                     <div class="setting-item-top" style="align-items: center;">
                       <div style="display: flex; flex-direction: column; gap: 2px;">
                         <span class="setting-name" data-i18n>Global keyboard shortcuts</span>
-                        <span class="setting-hint" data-i18n>Control Riff in background: Ctrl+Shift+Space (Play/Pause), Ctrl+Shift+Left/Right (Prev/Next), Ctrl+Shift+Up/Down (+5s/-5s)</span>
+                        <span class="setting-hint" data-i18n>Control Noctra in background: Ctrl+Shift+Space (Play/Pause), Ctrl+Shift+Left/Right (Prev/Next), Ctrl+Shift+Up/Down (+5s/-5s)</span>
                       </div>
                       <button type="button" class="effect-switch-btn" id="btn-global-shortcuts"><span class="thumb"></span></button>
                     </div>
@@ -2894,10 +2968,10 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                       </button>
                       <button type="button" class="theme-mode-btn" id="home-layout-riff" style="display: inline-flex; align-items: center; justify-content: center; gap: 6px;">
                         <img src="../../assets/icon.png" width="16" height="16" style="border-radius: 4px; object-fit: contain;" alt="">
-                        <span>Riff</span>
+                        <span>Noctra</span>
                       </button>
                     </div>
-                    <div style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline); margin-top: 6px;">Spotify: rows of mixes and quick access. Riff: the carousel.</div>
+                    <div style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline); margin-top: 6px;">Spotify: rows of mixes and quick access. Noctra: the carousel.</div>
                   </div>
 
                   <div class="setting-item">
@@ -2955,9 +3029,78 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
             </div>
           </div>
 
+          <div class="settings-section cat-hidden" id="settings-section-developer" data-cat="developer">
+            <span class="settings-section-title" data-i18n-fixed>Для разработчиков</span>
+            <div class="m3-group">
+              <div class="setting-item" id="setting-dev-element-inspector">
+                <div class="setting-item-top" style="align-items: center;">
+                  <div style="display: flex; flex-direction: column; gap: 2px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <span class="setting-name" data-i18n-fixed>Инспектор элементов</span>
+                      <span class="riff-beta-badge">NEW</span>
+                    </div>
+                    <span class="setting-hint" data-i18n-fixed>Alt+клик по элементу откроет исходник в VS Code. Работает в dev-сборке.</span>
+                  </div>
+                  <button class="effect-switch-btn" id="btn-dev-element-inspector" type="button" title="Developer element inspector"><span class="thumb"></span></button>
+                </div>
+              </div>
+              <div class="setting-item" id="setting-dev-bg-inspector">
+                <div class="setting-item-top" style="align-items: center;">
+                  <div style="display: flex; flex-direction: column; gap: 2px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <span class="setting-name" data-i18n-fixed>Инспектор фона</span>
+                      <span class="riff-beta-badge">NEW</span>
+                    </div>
+                    <span class="setting-hint" data-i18n-fixed>Ctrl+Alt+наведение — показать фоновый слой, его тень и эффекты. Ctrl+Alt+клик откроет исходник.</span>
+                  </div>
+                  <button class="effect-switch-btn" id="btn-dev-bg-inspector" type="button" title="Developer background effects inspector"><span class="thumb"></span></button>
+                </div>
+              </div>
+              <div class="setting-item" id="setting-dev-hide-ui">
+                <div class="setting-item-top" style="align-items: center;">
+                  <div style="display: flex; flex-direction: column; gap: 2px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <span class="setting-name" data-i18n-fixed>Скрыть окна</span>
+                      <span class="riff-beta-badge">NEW</span>
+                    </div>
+                    <span class="setting-hint" data-i18n-fixed>Оставляет только живой фон. Ctrl+Shift+H — скрыть или вернуть окна.</span>
+                  </div>
+                  <button class="effect-switch-btn" id="btn-dev-hide-ui" type="button" title="Hide all UI (Ctrl+Shift+H)"><span class="thumb"></span></button>
+                </div>
+              </div>
+              <div class="setting-item">
+                <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
+                  <div style="display: flex; flex-direction: column; gap: 2px;">
+                    <span class="setting-name" data-i18n-fixed>Инструменты Chromium</span>
+                    <span class="setting-hint" data-i18n-fixed>Открыть DevTools для текущего окна приложения</span>
+                  </div>
+                  <button class="btn-outline-pill" id="btn-dev-open-devtools" type="button" style="padding: 6px 14px; font-size: calc(12px * var(--font-scale, 1));">Открыть DevTools</button>
+                </div>
+              </div>
+              <div class="setting-item">
+                <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
+                  <div style="display: flex; flex-direction: column; gap: 2px;">
+                    <span class="setting-name" data-i18n-fixed>Перезагрузить интерфейс</span>
+                    <span class="setting-hint" data-i18n-fixed>Перезагрузить renderer без полного закрытия приложения</span>
+                  </div>
+                  <button class="btn-outline-pill" id="btn-dev-reload-ui" type="button" style="padding: 6px 14px; font-size: calc(12px * var(--font-scale, 1));">Reload UI</button>
+                </div>
+              </div>
+              <div class="setting-item">
+                <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
+                  <div style="display: flex; flex-direction: column; gap: 2px;">
+                    <span class="setting-name" data-i18n-fixed>Режим разработчика</span>
+                    <span class="setting-hint" data-i18n-fixed>Скрыть раздел «Для разработчиков» и выключить отладочные инструменты</span>
+                  </div>
+                  <button class="btn-outline-pill" id="btn-dev-disable-mode" type="button" style="padding: 6px 14px; font-size: calc(12px * var(--font-scale, 1)); color: #ffb4ab;">Выключить</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="settings-section" id="settings-section-about" data-cat="about">
-            <span class="settings-section-title">About</span>
-            <div class="riff-hero-banner-wrap">
+            <span class="settings-section-title" data-i18n-fixed>О приложении</span>
+            <div class="riff-hero-banner-wrap noctra-about-hero">
               <div class="riff-hero-banner">
                 <div class="riff-hero-floats">
                   <span class="riff-float-logo f1"></span>
@@ -2968,55 +3111,83 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                   <span class="riff-hero-logo-main"></span>
                 </div>
               </div>
-              <span class="riff-hero-title">Riff</span>
+              <a class="riff-hero-title noctra-repo-link" data-i18n-fixed href="https://github.com/Sqwer2017/noctra" target="_blank" rel="noopener noreferrer" title="Открыть репозиторий Noctra на GitHub">Noctra</a>
+              <span class="noctra-about-tagline">Независимый музыкальный плеер</span>
             </div>
             <div class="m3-group">
-            <div class="setting-item">
-              <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
-                <div style="display: flex; align-items: center; gap: 12px;">
-                  <div style="width: 32px; height: 32px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center;">
-                    <img src="../../assets/icon.png" alt="Riff" style="width: 32px; height: 32px; object-fit: cover;">
+              <div class="setting-item noctra-about-card">
+                <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
+                  <div style="display: flex; align-items: center; gap: 12px;">
+                    <div style="width: 36px; height: 36px; border-radius: 10px; overflow: hidden; display: flex; align-items: center; justify-content: center; background: var(--md-sys-color-surface-container-high);">
+                      <img src="../../assets/icon.png" alt="Noctra" style="width: 36px; height: 36px; object-fit: contain;">
+                    </div>
+                    <div style="display: flex; flex-direction: column;">
+                      <a class="setting-name noctra-repo-link" data-i18n-fixed href="https://github.com/Sqwer2017/noctra" target="_blank" rel="noopener noreferrer" title="Открыть репозиторий Noctra на GitHub">Noctra</a>
+                      <span id="about-version" data-dev-version-trigger role="button" tabindex="0" style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline); cursor: default;">Version 0.1.0</span>
+                    </div>
                   </div>
-                  <div style="display: flex; flex-direction: column;">
-                    <span class="setting-name">Riff</span>
-                    <span id="about-version" style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline);">Version 0.6.0</span>
-                  </div>
+                  <button class="btn-pill-primary" id="btn-check-updates" style="padding: 6px 14px; font-size: calc(12px * var(--font-scale, 1));">Проверить обновления</button>
                 </div>
-                <button class="btn-pill-primary" id="btn-check-updates" style="padding: 6px 14px; font-size: calc(12px * var(--font-scale, 1));">Check for updates</button>
+                <p class="noctra-about-text"><strong>Noctra</strong> — независимый десктопный музыкальный плеер для YouTube, YouTube Music, SoundCloud, Deezer, Apple Music и локальных файлов. Очереди, плейлисты, синхронизированные тексты, офлайн-библиотека, эквалайзер, темы, профиль слушателя и интеграции с внешними сервисами — в одном приложении.</p>
+                <p class="noctra-about-text">Библиотека, настройки и история хранятся локально на вашем устройстве. Noctra не предоставляет собственный сервер аккаунтов: поиск, воспроизведение и метаданные обеспечиваются сторонними сервисами.</p>
+                <div class="noctra-about-features" aria-label="Возможности">
+                  <span>YouTube</span><span>YouTube Music</span><span>SoundCloud</span><span>Deezer</span><span>Apple Music</span><span>Локальные файлы</span><span>Тексты</span><span>Офлайн</span><span>Эквалайзер</span><span>Темы</span><span>Профиль</span><span>Интеграции</span>
+                </div>
               </div>
-            </div>
 
-            <div class="setting-item">
-              <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
-                <span class="setting-name">Keyboard shortcuts</span>
-                <button class="btn-outline-pill" id="btn-open-shortcuts" type="button" style="padding: 6px 14px; font-size: calc(12px * var(--font-scale, 1));">Keyboard shortcuts</button>
+              <div class="setting-item">
+                <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
+                  <div style="display: flex; flex-direction: column; gap: 2px;">
+                    <span class="setting-name" data-i18n-fixed>О версии</span>
+                    <span class="setting-hint" data-i18n-fixed>Что такое Noctra, что нового и чем отличается эта версия</span>
+                  </div>
+                  <button class="btn-outline-pill" id="btn-open-version-info" type="button" style="padding: 6px 14px; font-size: calc(12px * var(--font-scale, 1));">Открыть</button>
+                </div>
               </div>
-            </div>
 
-            <div class="setting-item">
-              <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
-                <span class="setting-name">Diagnostics</span>
-                <button class="btn-outline-pill" id="btn-copy-diagnostics" style="padding: 6px 14px; font-size: calc(12px * var(--font-scale, 1));">Copy diagnostics</button>
+              <div class="setting-item noctra-about-card">
+                <div class="setting-item-top">
+                  <span class="setting-name">Правовая информация</span>
+                </div>
+                <div class="noctra-about-legal">
+                  <p>Noctra создан на базе открытого проекта <a href="https://github.com/rootscripts/riff" target="_blank" rel="noopener noreferrer">Riff</a> (© 2026 rootscripts), распространяемого по лицензии <a href="https://opensource.org/license/mit" target="_blank" rel="noopener noreferrer">MIT</a>. Изменения и дополнения Noctra также распространяются по лицензии MIT. Полный текст лицензии входит в состав приложения и доступен в файле LICENSE.</p>
+                  <p>Noctra не связан с авторами Riff, не спонсируется и не одобряется ими. Название Riff используется только для указания происхождения открытого кода.</p>
+                  <p>YouTube, YouTube Music, SoundCloud, Spotify, Apple Music, Deezer, Last.fm, Genius, LRCLIB и их названия или логотипы принадлежат соответствующим правообладателям. Noctra не является официальным клиентом этих сервисов, не хранит и не распространяет музыкальные каталоги. Пользователь самостоятельно отвечает за соблюдение условий сервисов и законодательства об авторском праве.</p>
+                  <p>Программа предоставляется «как есть», без явных или подразумеваемых гарантий, включая гарантии пригодности для конкретной цели. Авторы не несут ответственности за возможный ущерб или потерю данных в пределах, допускаемых законом. Перед экспериментами с библиотекой рекомендуется сделать резервную копию.</p>
+                </div>
               </div>
-            </div>
 
-            <div class="setting-item">
-              <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
-                <span class="setting-name">Logs</span>
-                <button class="btn-outline-pill" id="btn-open-logs" style="padding: 6px 14px; font-size: calc(12px * var(--font-scale, 1));">Open logs folder</button>
+              <div class="setting-item">
+                <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
+                  <span class="setting-name">Сочетания клавиш</span>
+                  <button class="btn-outline-pill" id="btn-open-shortcuts" type="button" style="padding: 6px 14px; font-size: calc(12px * var(--font-scale, 1));">Открыть список</button>
+                </div>
               </div>
-            </div>
+
+              <div class="setting-item">
+                <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
+                  <span class="setting-name">Диагностика</span>
+                  <button class="btn-outline-pill" id="btn-copy-diagnostics" style="padding: 6px 14px; font-size: calc(12px * var(--font-scale, 1));">Скопировать</button>
+                </div>
+              </div>
+
+              <div class="setting-item">
+                <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
+                  <span class="setting-name">Логи</span>
+                  <button class="btn-outline-pill" id="btn-open-logs" style="padding: 6px 14px; font-size: calc(12px * var(--font-scale, 1));">Открыть папку</button>
+                </div>
+              </div>
             </div>
           </div>
 
           <div class="settings-credits">
             <span class="settings-credits-text">
-              <svg class="settings-credits-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 0 0-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.75-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .4z"/>
+              <svg class="settings-credits-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
               </svg>
-              Riff made by rootless, support me: <a href="https://t.me/riffplayer" target="_blank" rel="noopener">t.me/riffplayer</a>
+              Noctra — независимый музыкальный плеер. Исходный код доступен по лицензии MIT.
             </span>
-            <span class="settings-version-tag">v0.6.0</span>
+            <span class="settings-version-tag">v0.1.0</span>
           </div>
             </div>
           </div>
@@ -3226,7 +3397,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
       
       <div class="cache-header">
         <h2>Clear Cache</h2>
-        <p>Clear cache and free up your storage, don't do it too often because Riff will get laggy.</p>
+        <p>Clear cache and free up your storage, don't do it too often because Noctra will get laggy.</p>
       </div>
 
       <div class="cache-stats-container">
@@ -3628,7 +3799,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
         </button>
       </div>
-      <p id="tools-modal-desc" style="margin: 0; color: var(--md-sys-color-on-surface-variant); font-size: calc(13px * var(--font-scale, 1)); line-height: 1.4;">Riff needs yt-dlp and ffmpeg to play and save tracks (~400 MB).</p>
+      <p id="tools-modal-desc" style="margin: 0; color: var(--md-sys-color-on-surface-variant); font-size: calc(13px * var(--font-scale, 1)); line-height: 1.4;">Noctra needs yt-dlp and ffmpeg to play and save tracks (~400 MB).</p>
 
       <div class="tools-list" style="display: flex; flex-direction: column; gap: 10px; margin-top: 6px;">
         <div class="tools-row" id="tools-row-ytdlp" style="background: var(--md-sys-color-surface-container); border-radius: var(--md-shape-corner-m); padding: 12px 16px; display: flex; flex-direction: column; gap: 8px;">
@@ -3832,7 +4003,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
             <line x1="12" y1="9" x2="12" y2="13"></line>
             <line x1="12" y1="17" x2="12.01" y2="17"></line>
           </svg>
-          <span>We don't steal anything, and Riff is open-source. Want to import everything? Use the export files (or log in, if you set that up). Want zero risk? Import a single playlist by link instead.</span>
+          <span>We don't steal anything, and Noctra is open-source. Want to import everything? Use the export files (or log in, if you set that up). Want zero risk? Import a single playlist by link instead.</span>
         </div>
       </div>
       <div class="sp-pane hidden" data-mode="login">
@@ -3858,7 +4029,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
             <line x1="12" y1="9" x2="12" y2="13"></line>
             <line x1="12" y1="17" x2="12.01" y2="17"></line>
           </svg>
-          <span>We don't steal anything, and Riff is open-source. Want to import everything? Use the export files (or log in, if you set that up). Want zero risk? Import a single playlist by link instead.</span>
+          <span>We don't steal anything, and Noctra is open-source. Want to import everything? Use the export files (or log in, if you set that up). Want zero risk? Import a single playlist by link instead.</span>
         </div>
       </div>
       <div id="spotify-import-progress-wrap" class="hidden" style="display: none !important; margin-bottom: 16px; flex-direction: column; align-items: center; gap: 8px;">
@@ -3936,7 +4107,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
             <line x1="12" y1="9" x2="12" y2="13"></line>
             <line x1="12" y1="17" x2="12.01" y2="17"></line>
           </svg>
-          <span>We don't steal anything, and Riff is open-source. Want to import everything? Use the export files. Want zero risk? Import a single playlist by link instead.</span>
+          <span>We don't steal anything, and Noctra is open-source. Want to import everything? Use the export files. Want zero risk? Import a single playlist by link instead.</span>
         </div>
       </div>
       <div id="apple-import-progress-wrap" class="hidden" style="display: none !important; margin-bottom: 16px; flex-direction: column; align-items: center; gap: 8px;">
@@ -4030,7 +4201,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
             <line x1="12" y1="9" x2="12" y2="13"></line>
             <line x1="12" y1="17" x2="12.01" y2="17"></line>
           </svg>
-          <span>We don't steal anything, and Riff is open-source. Want zero risk? Import a single playlist by link instead.</span>
+          <span>We don't steal anything, and Noctra is open-source. Want zero risk? Import a single playlist by link instead.</span>
         </div>
       </div>
       <div id="link-import-progress-wrap" class="hidden" style="display: none !important; margin-bottom: 16px; flex-direction: column; align-items: center; gap: 8px;">
@@ -4344,11 +4515,88 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
     </div>
   </div>
 
+  <div class="modal-backdrop hidden" id="noctra-version-modal">
+    <div class="dialog-card noctra-version-card" role="dialog" aria-modal="true" aria-labelledby="noctra-version-title">
+      <div class="dialog-header">
+        <div class="noctra-version-heading">
+          <div class="noctra-version-mark"><img src="../../assets/icon.png" alt="Noctra" draggable="false"></div>
+          <div>
+            <h3 class="modal-title" id="noctra-version-title" data-i18n-fixed>Noctra</h3>
+            <span class="noctra-version-version" id="noctra-version-version">Version 0.1.0</span>
+          </div>
+        </div>
+        <button class="btn-icon-pill" id="btn-close-noctra-version" type="button" title="Закрыть" aria-label="Закрыть">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="noctra-version-hero">
+        <div class="noctra-version-hero-art"><span class="noctra-version-orbit o1"></span><span class="noctra-version-orbit o2"></span><span class="noctra-version-orbit o3"></span><img src="../../assets/noctra-logo-transparent.png" alt="" draggable="false"></div>
+        <div class="noctra-version-hero-copy">
+          <span class="noctra-version-eyebrow">NOCTRA · ДЕМО-ВЕРСИЯ</span>
+          <h2>Музыка, которая остаётся твоей.</h2>
+          <p>Noctra — независимый плеер для музыки из YouTube, SoundCloud, Deezer, Apple Music и локальных файлов. Без подписки, рекламы и облачной привязки.</p>
+        </div>
+      </div>
+      <div class="noctra-version-grid">
+        <div class="noctra-version-block">
+          <span class="noctra-version-label">Что нового</span>
+          <ul>
+            <li>Профиль слушателя: XP, ранги, достижения и ежедневные задания.</li>
+            <li>Новая главная: «Только для тебя», «Послушай сегодня», недавние альбомы и случайный артист.</li>
+            <li>Живой фон, мягкие панели и обновлённая карточка артиста.</li>
+            <li>Уведомления в стиле Dynamic Island и режим разработчика.</li>
+          </ul>
+        </div>
+        <div class="noctra-version-block">
+          <span class="noctra-version-label">Что внутри</span>
+          <ul>
+            <li>Плейлисты, очередь, избранное и история прослушивания.</li>
+            <li>Синхронизированные тексты, офлайн-библиотека и эквалайзер.</li>
+            <li>Темы, кастомные обложки, интеграции и локальные данные.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="noctra-version-page">
+        <h3>Что такое Noctra</h3>
+        <p>Noctra — это независимый десктопный музыкальный плеер, собранный вокруг идеи локальной, спокойной и красивой музыкальной библиотеки. Приложение не требует подписки на собственный сервис: вы подключаете любимые площадки, импортируете плейлисты, добавляете локальные файлы и слушаете всё в одном окне. Noctra не является официальным клиентом YouTube, SoundCloud, Spotify, Apple Music или Deezer.</p>
+        <h3>Музыка и источники</h3>
+        <p>Поиск и воспроизведение работают через публичные возможности сторонних сервисов. Поддерживаются YouTube, YouTube Music, SoundCloud, Deezer, Apple Music и локальные файлы. Плейлисты можно импортировать по ссылке, а треки — сохранять в избранное, очереди и собственные коллекции. Часть функций зависит от доступности API площадок и может меняться без предупреждения.</p>
+        <h3>Библиотека и прослушивание</h3>
+        <p>Внутри есть плейлисты, очередь, история, избранное, локальная медиатека, поиск, сортировка, офлайн-библиотека, эквалайзер, синхронизированные и обычные тексты, полноэкранный режим, мини-плеер и интеграции с Last.fm и Discord RPC. Все данные библиотеки и настройки хранятся на вашем устройстве.</p>
+        <h3>Профиль и прогресс</h3>
+        <p>Профиль слушателя — это не социальная сеть и не облачный аккаунт. XP, ранги, достижения, ежедневные задания и статистика рассчитываются локально по вашей истории. Профиль можно оформить: выбрать аватар, баннер, статус, описание и эффект баннера. Эффекты «Звёзды», «Туман», «Аврора» и «Угли» применяются и к странице профиля, и к карточке аккаунта в настройках.</p>
+        <h3>Внешний вид</h3>
+        <p>Noctra использует Material 3-подход к интерфейсу: темы, акцентные цвета, живые фоны, мягкие панели, адаптивные тени и плавные переходы. Можно менять масштаб интерфейса, шрифт, форму карточек, фон, боковую панель и расположение элементов. Два режима главной — Spotify-подобный и авторский карусельный; в карусели категории переключаются свайпом вверх/вниз или клавишами.</p>
+        <h3>Приватность</h3>
+        <p>Noctra не предоставляет собственный аккаунт-сервер, не требует входа для основного плеера и не отправляет статистику прослушивания разработчикам. История, настройки, кэш и локальные файлы остаются на устройстве. Для работы поиска и потокового воспроизведения запросы идут напрямую к выбранным сторонним сервисам. Если вы подключаете Google, Last.fm, Spotify или другой сервис, действуют правила соответствующей площадки.</p>
+        <h3>Ограничения демо-версии</h3>
+        <p>Это версия 0.1.0: отдельные функции могут меняться, а сторонние API — временно не отвечать. Сохранение треков и работа офлайн зависят от доступности yt-dlp и ffmpeg. Некоторые интеграции требуют собственных ключей или входа в сервис. Перед экспериментами с библиотекой сделайте резервную копию аккаунта в настройках.</p>
+        <h3>Благодарности</h3>
+        <p>Noctra создана на базе открытого проекта Riff (© rootscripts, MIT). Спасибо авторам Riff за фундамент, сообществу за идеи и всем, кто тестирует эту демо-версию. Полные условия и список сторонних компонентов находятся в LICENSE и NOTICE.</p>
+        <div class="noctra-version-history">
+          <h3>История версий</h3>
+          <div class="noctra-version-entry is-current">
+            <strong>0.1.0</strong>
+            <span>Первая демо-версия Noctra: профиль, обновлённая главная, живой фон, эффекты баннера, режим разработчика и новая система уведомлений.</span>
+          </div>
+          <div class="noctra-version-entry is-future">
+            <strong>Следующие версии</strong>
+            <span>Планируются отдельный список версий, ещё больше источников, улучшенная работа офлайн и дополнительные инструменты для разработчиков.</span>
+          </div>
+        </div>
+      </div>
+      <p class="noctra-version-credit">Noctra — независимый проект на базе открытого кода Riff (MIT). Не связан с авторами Riff и музыкальными сервисами. Полная информация — в разделе «О приложении».</p>
+      <div class="dialog-actions" style="justify-content:flex-end;">
+        <button class="btn-pill-primary" id="btn-noctra-version-ok" type="button">Понятно</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-backdrop ota-update-backdrop hidden" id="update-modal">
     <div class="ota-update-sheet" id="update-sheet-card">
       <div class="ota-update-time" id="update-release-time">Just now</div>
       <div class="ota-update-top-row">
-        <span class="ota-update-version" id="update-version-badge">v0.6.0</span>
+        <span class="ota-update-version" id="update-version-badge">v0.1.0</span>
         <div class="ota-update-actions">
           <button class="ota-btn-update" id="btn-update-now" type="button" data-i18n>Update</button>
           <button class="ota-btn-ignore" id="btn-update-later" type="button" data-i18n>Ignore</button>
@@ -4367,7 +4615,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
     </div>
     <div class="ota-center-spinner hidden" id="update-center-spinner">
       <svg class="g-spinner" width="46" height="46" viewBox="0 0 48 48"><circle cx="24" cy="24" r="20"/></svg>
-      <span class="ota-spinner-label" id="update-spinner-label" data-i18n>Updating Riff...</span>
+      <span class="ota-spinner-label" id="update-spinner-label" data-i18n>Updating Noctra...</span>
     </div>
   </div>
 
@@ -4688,10 +4936,12 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
   <div class="modal-backdrop hidden" id="offline-mode-modal"><div class="dialog-card" style="max-width:380px;text-align:center;align-items:center;gap:14px;"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.58 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg><p style="margin:0;font-size:15px;font-weight:600;line-height:1.45;color:var(--md-sys-color-on-surface);" data-i18n>You are in offline mode because there is no WiFi connection.</p><div class="dialog-actions" style="justify-content:center;width:100%;gap:10px;"><button type="button" class="btn-outline-pill" id="btn-offline-ok" style="flex:1;justify-content:center;" data-i18n>OK</button><button type="button" class="btn-pill-primary" id="btn-offline-retry" style="flex:1;justify-content:center;" data-i18n>Retry</button></div></div></div>
 
   <script src="../../assets/hls.min.js"></script>
+  <script src="../../node_modules/animejs/dist/bundles/anime.umd.min.js"></script>
   <script src="audio.js"></script>
   <script src="shapes.js"></script>
   <script src="lyrics-rtl.js"></script>
   <script src="track-sort.js"></script>
   <script src="app.js"></script>
+  <script src="profile.js"></script>
 </body>
 </html>

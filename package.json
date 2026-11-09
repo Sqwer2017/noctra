@@ -1,9 +1,9 @@
 {
-  "name": "riff",
-  "version": "44.2.0",
+  "name": "noctra",
+  "version": "0.1.0",
   "main": "src/main/main.js",
   "bin": {
-    "riff": "src/main/cli.js"
+    "noctra": "src/main/cli.js"
   },
   "scripts": {
     "start": "electron .",
@@ -14,32 +14,33 @@
     "release:major": "npm version major && git push --follow-tags"
   },
   "keywords": [],
-  "author": "rootscripts",
+  "author": "Noctra contributors",
   "license": "MIT",
-  "description": "made for humans, Riff - audio player.",
+  "description": "Noctra — independent desktop music player and audio suite.",
   "devDependencies": {
     "electron": "^41.7.1",
     "electron-builder": "^26.15.3"
   },
   "dependencies": {
+    "animejs": "^4.5.0",
     "cfonts": "^3.3.1",
     "discord-rpc": "^4.0.1",
     "electron-updater": "^6.8.9",
     "hls.js": "^1.7.1",
     "tone": "^15.1.22"
   },
-  "productName": "Riff",
-  "homepage": "https://github.com/rootscripts/riff",
+  "productName": "Noctra",
+  "homepage": "https://github.com/Sqwer2017/noctra",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/rootscripts/riff.git"
+    "url": "git+https://github.com/Sqwer2017/noctra.git"
   },
   "bugs": {
-    "url": "https://github.com/rootscripts/riff/issues"
+    "url": "https://github.com/Sqwer2017/noctra/issues"
   },
   "build": {
-    "appId": "io.github.rootscripts.riff",
-    "productName": "Riff",
+    "appId": "io.github.sqwer2017.noctra",
+    "productName": "Noctra",
     "artifactName": "${name}-${version}-${os}-${arch}.${ext}",
     "directories": {
       "output": "dist"
@@ -48,6 +49,8 @@
       "src/**/*",
       "assets/**/*",
       "vendor/**/*",
+      "LICENSE",
+      "NOTICE",
       "package.json"
     ],
     "win": {
@@ -59,7 +62,7 @@
           ]
         }
       ],
-      "icon": "assets/icon.png"
+      "icon": "assets/icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -106,8 +109,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "rootscripts",
-        "repo": "riff",
+        "owner": "Sqwer2017",
+        "repo": "noctra",
         "releaseType": "release"
       }
     ],

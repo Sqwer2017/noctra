@@ -34,7 +34,7 @@ function initUpdater(getWindow) {
   if (pkg.version) {
     app.setVersion(pkg.version);
   }
-  const releasesUrl = `${pkg.homepage || 'https://github.com/rootscripts/riff'}/releases`;
+  const releasesUrl = `${pkg.homepage || 'https://github.com/Sqwer2017/noctra'}/releases`;
   let manualCheck = false;
   let installNow = false;
   let current = null;
@@ -75,7 +75,7 @@ function initUpdater(getWindow) {
         resetTimer();
         const res = await fetch(url, {
           signal: controller.signal,
-          headers: { 'User-Agent': 'Riff-Player' }
+          headers: { 'User-Agent': 'Noctra-Player' }
         });
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
@@ -141,7 +141,7 @@ function initUpdater(getWindow) {
     if (process.platform === 'win32') {
       try {
         if (process.env.PORTABLE_EXECUTABLE_FILE) {
-          const batFile = path.join(os.tmpdir(), `riff-update-${Date.now()}.bat`);
+          const batFile = path.join(os.tmpdir(), `noctra-update-${Date.now()}.bat`);
           const targetExe = process.env.PORTABLE_EXECUTABLE_FILE;
           const batContent = `@echo off\r\ntimeout /t 2 /nobreak >nul\r\ncopy /y "${tmpFile}" "${targetExe}"\r\nstart "" "${targetExe}"\r\ndel "%~f0"\r\n`;
           fs.writeFileSync(batFile, batContent);
@@ -169,8 +169,8 @@ function initUpdater(getWindow) {
 
   const checkViaGithubApi = async () => {
     try {
-      const res = await fetch('https://api.github.com/repos/rootscripts/riff/releases/latest', {
-        headers: { 'User-Agent': 'Riff-Player' }
+      const res = await fetch('https://api.github.com/repos/Sqwer2017/noctra/releases/latest', {
+        headers: { 'User-Agent': 'Noctra-Player' }
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const json = await res.json();
@@ -252,8 +252,8 @@ function initUpdater(getWindow) {
         let htmlUrl = `${releasesUrl}/tag/v${info.version}`;
 
         try {
-          const res = await fetch('https://api.github.com/repos/rootscripts/riff/releases/latest', {
-            headers: { 'User-Agent': 'Riff-Player' }
+          const res = await fetch('https://api.github.com/repos/Sqwer2017/noctra/releases/latest', {
+            headers: { 'User-Agent': 'Noctra-Player' }
           });
           if (res.ok) {
             const json = await res.json();

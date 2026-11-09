@@ -1,7 +1,9 @@
 
 const RPC = require('discord-rpc');
 
-const CLIENT_ID = '1520100510877749358';
+// Discord displays the application name registered for this client ID.
+const DEFAULT_CLIENT_ID = '1569429377203306496';
+const CLIENT_ID = String(process.env.NOCTRA_DISCORD_CLIENT_ID || DEFAULT_CLIENT_ID).trim();
 const RECONNECT_DELAY_MS = 15000;
 
 let rpcClient = null;
@@ -18,7 +20,7 @@ function initRPC() {
 
   rpcClient.on('ready', () => {
     isConnected = true;
-    console.log('[Discord RPC] Connected as', rpcClient.user?.username || 'unknown');
+    console.log('[Discord RPC] Connected as', rpcClient.user?.username || 'unknown', '· app:', rpcClient.application?.name || CLIENT_ID);
     if (lastTrackInfo && isEnabled) {
       _setActivity(lastTrackInfo);
     }

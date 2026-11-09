@@ -1,0 +1,34 @@
+Noctra
+======
+
+Noctra is an independent desktop music player derived from the open-source
+Riff project (https://github.com/rootscripts/riff).
+
+Original project
+----------------
+Riff
+Copyright (c) 2026 rootscripts
+Licensed under the MIT License. The original MIT license text is included in
+the LICENSE file in this repository.
+
+Noctra modifications
+--------------------
+Copyright (c) 2026 Noctra contributors
+The modifications and additions in this distribution are also released under
+the MIT License unless a file states otherwise.
+
+Noctra is not affiliated with, sponsored by, or endorsed by the Riff authors
+or the Riff project. “Riff” is used only for attribution and to describe the
+open-source origin of this software.
+
+Third-party services and trademarks
+-----------------------------------
+Noctra is a client for third-party music and metadata services. Names, logos,
+and trademarks such as YouTube, YouTube Music, SoundCloud, Spotify, Apple
+Music, Deezer, Last.fm, Genius, and LRCLIB belong to their respective owners.
+Noctra does not host or distribute music catalogues and is not an official
+client of those services. Users are responsible for complying with the terms
+of service and copyright rules that apply to the content they access.
+
+The software is provided “as is”, without warranty of any kind. See LICENSE
+for the full MIT warranty and liability disclaimer.

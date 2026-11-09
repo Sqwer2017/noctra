@@ -18,11 +18,69 @@ const {
 } = require('./google-oauth');
 const { fetchYouTubeLibrary } = require('./youtube-data');
 const RFACC_KEY = crypto.createHash('sha256').update('riff-account-key-v1').digest();
-const APP_ID = 'io.github.rootscripts.riff';
+const APP_ID = 'io.github.sqwer2017.noctra';
 const IS_MAC = process.platform === 'darwin';
 
-app.setName('Riff');
+app.setName('Noctra');
 if (process.platform === 'win32') app.setAppUserModelId(APP_ID);
+
+try {
+  const customUserData = process.argv.some(arg => String(arg).startsWith('--user-data-dir'));
+  if (!customUserData) {
+    const root = app.getPath('appData');
+    const legacyDir = path.join(root, 'Riff');
+    const currentDir = path.join(root, 'Noctra');
+    let targetDir = currentDir;
+    if (!fs.existsSync(currentDir) && fs.existsSync(legacyDir)) {
+      try { fs.renameSync(legacyDir, currentDir); }
+      catch (_) { targetDir = legacyDir; }
+    }
+    app.setPath('userData', targetDir);
+  }
+} catch (_) {}
+
+const DEV_SOURCE_FILES = new Set([
+  'src/renderer/index.html',
+  'src/renderer/app.js',
+  'src/renderer/styles.css',
+  'src/renderer/profile.js',
+  'src/renderer/profile.css',
+  'src/renderer/welcome.html'
+]);
+
+function resolveDevSourceTarget(payload = {}) {
+  if (app.isPackaged) {
+    return { ok: false, error: 'Source navigation is available only in a development build' };
+  }
+  const relativeFile = String(payload.file || '').replace(/\\/g, '/');
+  if (!DEV_SOURCE_FILES.has(relativeFile)) {
+    return { ok: false, error: 'Source file is not allowed' };
+  }
+  const token = String(payload.token || '').slice(0, 500);
+  if (!token) return { ok: false, error: 'Source marker is missing' };
+
+  const fullPath = path.join(app.getAppPath(), relativeFile);
+  let content;
+  try {
+    content = fs.readFileSync(fullPath, 'utf8');
+  } catch (err) {
+    return { ok: false, error: 'Could not read source file' };
+  }
+  const index = content.indexOf(token);
+  if (index < 0) {
+    return { ok: false, error: 'Source marker was not found' };
+  }
+  const line = content.slice(0, index).split(/\r?\n/).length;
+  const lineStart = content.lastIndexOf('\n', Math.max(0, index - 1)) + 1;
+  const column = index - lineStart + 1;
+  const normalizedPath = fullPath.replace(/\\/g, '/');
+  const uriPath = normalizedPath.startsWith('/') ? normalizedPath : '/' + normalizedPath;
+  const uri = 'vscode://file' + encodeURI(uriPath) + ':' + line + ':' + column;
+  if (payload.open !== false) {
+    shell.openExternal(uri).catch(() => {});
+  }
+  return { ok: true, file: relativeFile, path: normalizedPath, line, column, uri };
+}
 
 function encryptAccount(dataObj) {
   const jsonStr = typeof dataObj === 'string' ? dataObj : JSON.stringify(dataObj);
@@ -384,7 +442,7 @@ function runGUI() {
       minWidth: 800,
       minHeight: 540,
                                    backgroundColor: firstRun ? '#8d5ef2' : '#000000',
-                                   title: 'Riff',
+                                   title: 'Noctra',
                                    icon: path.join(__dirname, '../../assets', 'icon.png'),
                                    frame: IS_MAC,
                                    titleBarStyle: IS_MAC ? 'hiddenInset' : 'hidden',
@@ -539,7 +597,7 @@ function runGUI() {
     });
 
     ipcMain.handle('get-diagnostics', async () => {
-      const lines = [`Riff ${app.getVersion()}`, `OS ${process.platform} ${process.arch} ${os.release()}`, `Electron ${process.versions.electron} Chromium ${process.versions.chrome} Node ${process.versions.node}`, `Locale ${app.getLocale()}`, `Data ${DATA_DIR}`];
+      const lines = [`Noctra ${app.getVersion()}`, `OS ${process.platform} ${process.arch} ${os.release()}`, `Electron ${process.versions.electron} Chromium ${process.versions.chrome} Node ${process.versions.node}`, `Locale ${app.getLocale()}`, `Data ${DATA_DIR}`];
       for (const name of ['yt-dlp', 'ffmpeg']) {
         const bin = resolveBinary(name);
         lines.push(`${name}: ${bin || 'NOT FOUND'}`);
@@ -1332,6 +1390,11 @@ function runGUI() {
       });
 
       ipcMain.handle('get-app-version', () => app.getVersion());
+      ipcMain.handle('dev-open-source', (event, payload) => resolveDevSourceTarget(payload || {}));
+      ipcMain.on('dev-open-devtools', (event) => {
+        const win = BrowserWindow.fromWebContents(event.sender);
+        if (win && !win.isDestroyed()) win.webContents.openDevTools({ mode: 'detach' });
+      });
 
       ipcMain.handle('save-playlists-json', async (event, payload) => {
         const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
@@ -1351,9 +1414,9 @@ function runGUI() {
         try {
           const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
           const r = await dialog.showSaveDialog(win, {
-            title: 'Export Riff account',
-            defaultPath: 'riff-account.rfacc',
-            filters: [{ name: 'Riff Account (.rfacc)', extensions: ['rfacc'] }]
+            title: 'Export Noctra account',
+            defaultPath: 'noctra-account.rfacc',
+            filters: [{ name: 'Noctra Account (.rfacc)', extensions: ['rfacc'] }]
           });
           if (r.canceled || !r.filePath) return { canceled: true };
           const buffer = encryptAccount(payload || {});
@@ -1368,9 +1431,9 @@ function runGUI() {
         try {
           const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
           const r = await dialog.showOpenDialog(win, {
-            title: 'Import Riff account',
+            title: 'Import Noctra account',
             properties: ['openFile'],
-            filters: [{ name: 'Riff Account (.rfacc)', extensions: ['rfacc'] }]
+            filters: [{ name: 'Noctra Account (.rfacc)', extensions: ['rfacc'] }]
           });
           if (r.canceled || !r.filePaths || !r.filePaths.length) return { canceled: true };
           const buffer = await fs.promises.readFile(r.filePaths[0]);
@@ -1860,14 +1923,14 @@ function runGUI() {
               const actual = Buffer.from(returnedState);
               if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) {
                 res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
-                res.end('Authorization could not be verified. Return to Riff and try again.');
+                res.end('Authorization could not be verified. Return to Noctra and try again.');
                 finish(new Error('Google authorization state did not match'));
                 return;
               }
               const providerError = requestUrl.searchParams.get('error');
               if (providerError) {
                 res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-                res.end('<!doctype html><title>Riff</title><p>Google sign-in was cancelled. You can close this tab and return to Riff.</p>');
+                res.end('<!doctype html><title>Noctra</title><p>Google sign-in was cancelled. You can close this tab and return to Noctra.</p>');
                 finish(new Error(providerError === 'access_denied'
                   ? 'Google sign-in was cancelled'
                   : `Google authorization failed: ${providerError}`));
@@ -1876,12 +1939,12 @@ function runGUI() {
               const code = requestUrl.searchParams.get('code');
               if (!code) {
                 res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
-                res.end('Google did not return an authorization code. Return to Riff and try again.');
+                res.end('Google did not return an authorization code. Return to Noctra and try again.');
                 finish(new Error('Google did not return an authorization code'));
                 return;
               }
               res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-              res.end('<!doctype html><title>Riff</title><p>Google account connected. You can close this tab and return to Riff.</p>');
+              res.end('<!doctype html><title>Noctra</title><p>Google account connected. You can close this tab and return to Noctra.</p>');
               finish(null, { code });
             };
             server.on('request', onRequest);
@@ -1894,7 +1957,7 @@ function runGUI() {
             codeVerifier
           });
           if (!tokens.refresh_token) {
-            throw new Error('Google did not provide a refresh token. Revoke Riff access in your Google account and try again.');
+            throw new Error('Google did not provide a refresh token. Revoke Noctra access in your Google account and try again.');
           }
           writeGoogleOAuthData({
             accessToken: tokens.access_token,
@@ -2293,7 +2356,7 @@ function runGUI() {
           let trayIcon = nativeImage.createFromPath(iconPath);
           trayIcon = trayIcon.resize({ width: 22, height: 22 });
           tray = new Tray(trayIcon);
-          tray.setToolTip('Riff');
+          tray.setToolTip('Noctra');
           const contextMenu = Menu.buildFromTemplate([
             {
               label: 'Show/Hide',
