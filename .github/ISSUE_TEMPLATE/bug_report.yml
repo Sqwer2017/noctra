@@ -77,7 +77,7 @@ body:
     id: logs
     attributes:
       label: Console Logs
-      description: Paste logs copied from Settings > About or from `riff.log` in your logs folder. Mandatory.
+      description: Paste logs copied from Settings > About or from `noctra.log` in your logs folder. Mandatory.
       placeholder: Paste your logs or terminal output here...
       render: text
     validations:

@@ -259,9 +259,12 @@ function resolveBinary(name) {
     delete binaryCache[name];
   }
   const exe = IS_WIN ? `${name}.exe` : name;
-  const envKey = `RIFF_${name.replace(/[^a-z0-9]/gi, '').toUpperCase()}`;
+  const envStem = name.replace(/[^a-z0-9]/gi, '').toUpperCase();
+  const envKey = `NOCTRA_${envStem}`;
+  const legacyEnvKey = `RIFF_${envStem}`;
   const candidates = [
     process.env[envKey],
+    process.env[legacyEnvKey],
     path.join(BIN_DIR, exe),
     process.resourcesPath && path.join(process.resourcesPath, 'bin', exe),
     path.join(__dirname, '../../bin', exe)
