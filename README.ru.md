@@ -26,6 +26,7 @@
 Без подписки. Без рекламы. Без привязки к облаку.
 
 [**Скачать Noctra**](https://github.com/Sqwer2017/noctra/releases) ·
+[Сайт](https://sqwer2017.github.io/noctra/) ·
 [Сообщить об ошибке](https://github.com/Sqwer2017/noctra/issues) ·
 [Исходный код](https://github.com/Sqwer2017/noctra)
 

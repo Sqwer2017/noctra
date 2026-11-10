@@ -26,6 +26,7 @@
 No subscription. No ads. No cloud lock-in.
 
 [**Download Noctra**](https://github.com/Sqwer2017/noctra/releases) ·
+[Website](https://sqwer2017.github.io/noctra/) ·
 [Report an issue](https://github.com/Sqwer2017/noctra/issues) ·
 [View source](https://github.com/Sqwer2017/noctra)
 
