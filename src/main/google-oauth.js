@@ -6,6 +6,9 @@ const GOOGLE_CLIENT_ID = String(
   process.env.NOCTRA_GOOGLE_CLIENT_ID
   || '454232821400-s15b3c0m0bvs2i0dg09p08v7busr4edh.apps.googleusercontent.com'
 ).trim();
+// Desktop OAuth clients require their client secret at the token endpoint. Keep it
+// out of the repository: pass it through the process environment.
+const GOOGLE_CLIENT_SECRET = String(process.env.NOCTRA_GOOGLE_CLIENT_SECRET || '').trim();
 const GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/youtube.readonly'
 ];
@@ -65,21 +68,25 @@ async function requestToken(params, fetchImpl = fetch) {
 }
 
 function exchangeAuthorizationCode({ code, redirectUri, codeVerifier }, fetchImpl = fetch) {
-  return requestToken({
+  const params = {
     client_id: GOOGLE_CLIENT_ID,
     code,
     code_verifier: codeVerifier,
     grant_type: 'authorization_code',
     redirect_uri: redirectUri
-  }, fetchImpl);
+  };
+  if (GOOGLE_CLIENT_SECRET) params.client_secret = GOOGLE_CLIENT_SECRET;
+  return requestToken(params, fetchImpl);
 }
 
 function refreshAccessToken(refreshToken, fetchImpl = fetch) {
-  return requestToken({
+  const params = {
     client_id: GOOGLE_CLIENT_ID,
     refresh_token: refreshToken,
     grant_type: 'refresh_token'
-  }, fetchImpl);
+  };
+  if (GOOGLE_CLIENT_SECRET) params.client_secret = GOOGLE_CLIENT_SECRET;
+  return requestToken(params, fetchImpl);
 }
 
 module.exports = {
