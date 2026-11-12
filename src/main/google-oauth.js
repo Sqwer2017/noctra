@@ -4,10 +4,13 @@ const crypto = require('crypto');
 
 const GOOGLE_CLIENT_ID = String(
   process.env.NOCTRA_GOOGLE_CLIENT_ID
-  || '171523925886-acon5eeqsfuffmjpfvp315ev7d96s2pj.apps.googleusercontent.com'
+  || '454232821400-s15b3c0m0bvs2i0dg09p08v7busr4edh.apps.googleusercontent.com'
 ).trim();
 const GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/youtube.readonly'
+];
+const DRIVE_SCOPES = [
+  'https://www.googleapis.com/auth/drive.appdata'
 ];
 
 function createCodeVerifier() {
@@ -22,19 +25,21 @@ function createOAuthState() {
   return crypto.randomBytes(32).toString('base64url');
 }
 
-function createAuthorizationUrl({ redirectUri, state, codeChallenge }) {
+function createAuthorizationUrl({ redirectUri, state, codeChallenge, scopes }) {
   if (!redirectUri || !state || !codeChallenge) {
     throw new Error('Missing Google OAuth request parameters');
   }
+  const requestedScopes = Array.isArray(scopes) && scopes.length ? scopes : GOOGLE_SCOPES;
   const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
   url.searchParams.set('client_id', GOOGLE_CLIENT_ID);
   url.searchParams.set('redirect_uri', redirectUri);
   url.searchParams.set('response_type', 'code');
-  url.searchParams.set('scope', GOOGLE_SCOPES.join(' '));
+  url.searchParams.set('scope', requestedScopes.join(' '));
   url.searchParams.set('state', state);
   url.searchParams.set('code_challenge', codeChallenge);
   url.searchParams.set('code_challenge_method', 'S256');
   url.searchParams.set('access_type', 'offline');
+  url.searchParams.set('include_granted_scopes', 'true');
   url.searchParams.set('prompt', 'select_account consent');
   return url.toString();
 }
@@ -80,6 +85,7 @@ function refreshAccessToken(refreshToken, fetchImpl = fetch) {
 module.exports = {
   GOOGLE_CLIENT_ID,
   GOOGLE_SCOPES,
+  DRIVE_SCOPES,
   createCodeVerifier,
   createCodeChallenge,
   createOAuthState,
