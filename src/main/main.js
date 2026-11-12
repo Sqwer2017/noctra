@@ -9,6 +9,7 @@ const { spawn, execFile } = require('child_process');
 const crypto = require('crypto');
 const zlib = require('zlib');
 const {
+  DRIVE_SCOPES,
   createCodeVerifier,
   createCodeChallenge,
   createOAuthState,
@@ -1854,10 +1855,16 @@ function runGUI() {
         fs.writeFileSync(GOOGLE_OAUTH_FILE, safeStorage.encryptString(JSON.stringify(data)));
       }
 
-      async function getGoogleAccessToken() {
+      async function getGoogleAccessToken(options = {}) {
         const auth = readGoogleOAuthData();
         if (!auth || !auth.refreshToken) {
-          throw new Error('Sign in to Google before importing your YouTube library');
+          throw new Error(options.missingMessage || 'Sign in to Google before continuing');
+        }
+        if (options.requiredScope) {
+          const scopes = String(auth.scope || '').split(/\s+/);
+          if (!scopes.includes(options.requiredScope)) {
+            throw new Error('Google Drive access has not been granted. Connect Google Drive in Settings → Integrations.');
+          }
         }
         if (auth.accessToken && auth.expiresAt > Date.now() + 60000) {
           return auth.accessToken;
@@ -1866,11 +1873,12 @@ function runGUI() {
         auth.accessToken = refreshed.access_token;
         auth.expiresAt = Date.now() + (Number(refreshed.expires_in) || 3600) * 1000;
         if (refreshed.refresh_token) auth.refreshToken = refreshed.refresh_token;
+        if (refreshed.scope) auth.scope = refreshed.scope;
         writeGoogleOAuthData(auth);
         return auth.accessToken;
       }
 
-      async function startGoogleOAuthLogin() {
+      async function startGoogleOAuthLogin(options = {}) {
         if (!safeStorage.isEncryptionAvailable()) {
           throw new Error('Secure storage is unavailable on this system');
         }
@@ -1886,7 +1894,8 @@ function runGUI() {
         const authUrl = createAuthorizationUrl({
           redirectUri,
           state,
-          codeChallenge: createCodeChallenge(codeVerifier)
+          codeChallenge: createCodeChallenge(codeVerifier),
+          scopes: options.scopes || DRIVE_SCOPES
         });
         let cancelCallback;
         try {
@@ -1959,11 +1968,15 @@ function runGUI() {
           if (!tokens.refresh_token) {
             throw new Error('Google did not provide a refresh token. Revoke Noctra access in your Google account and try again.');
           }
+          let previous = {};
+          try { previous = readGoogleOAuthData() || {}; } catch (_) {}
           writeGoogleOAuthData({
+            ...previous,
             accessToken: tokens.access_token,
             refreshToken: tokens.refresh_token,
             expiresAt: Date.now() + (Number(tokens.expires_in) || 3600) * 1000,
-            scope: tokens.scope || ''
+            scope: tokens.scope || (options.scopes || DRIVE_SCOPES).join(' '),
+            driveConnectedAt: Date.now()
           });
         } finally {
           if (cancelCallback) cancelCallback();
@@ -1972,6 +1985,193 @@ function runGUI() {
           }
         }
       }
+
+      const DRIVE_BACKUP_NAME = 'noctra-account.rfacc';
+      const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
+
+      function driveScopeGranted(auth) {
+        return Boolean(auth && auth.refreshToken && String(auth.scope || '').split(/\s+/).includes(DRIVE_SCOPE));
+      }
+
+      async function driveApiFetch(pathname, options = {}) {
+        const token = await getGoogleAccessToken({
+          requiredScope: DRIVE_SCOPE,
+          missingMessage: 'Sign in to Google Drive in Settings → Integrations'
+        });
+        const url = /^https?:\/\//i.test(pathname)
+          ? pathname
+          : (pathname.startsWith('/upload/drive/v3/')
+            ? 'https://www.googleapis.com' + pathname
+            : 'https://www.googleapis.com/drive/v3' + pathname);
+        const headers = Object.assign({}, options.headers || {}, {
+          Authorization: `Bearer ${token}`
+        });
+        const response = await fetch(url, {
+          ...options,
+          headers,
+          signal: AbortSignal.timeout(options.timeoutMs || 45000)
+        });
+        if (!response.ok) {
+          let detail = '';
+          try {
+            const data = await response.json();
+            detail = (data && data.error && data.error.message) || '';
+          } catch (_) {}
+          throw new Error(`Google Drive request failed (${response.status})${detail ? ': ' + detail : ''}`);
+        }
+        return response;
+      }
+
+      async function driveFindBackup() {
+        const params = new URLSearchParams({
+          spaces: 'appDataFolder',
+          q: `name = '${DRIVE_BACKUP_NAME}' and trashed = false`,
+          fields: 'files(id,name,modifiedTime,size)',
+          orderBy: 'modifiedTime desc',
+          pageSize: '1'
+        });
+        const response = await driveApiFetch('/files?' + params.toString());
+        const data = await response.json();
+        const file = data && Array.isArray(data.files) ? data.files[0] : null;
+        return file || null;
+      }
+
+      async function driveUploadBackup(payload) {
+        const existing = await driveFindBackup();
+        const buffer = encryptAccount(payload || {});
+        const boundary = 'noctra-' + crypto.randomBytes(12).toString('hex');
+        const metadata = existing
+          ? { name: DRIVE_BACKUP_NAME }
+          : { name: DRIVE_BACKUP_NAME, parents: ['appDataFolder'] };
+        const body = Buffer.concat([
+          Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`, 'utf8'),
+          Buffer.from(`--${boundary}\r\nContent-Type: application/octet-stream\r\n\r\n`, 'utf8'),
+          buffer,
+          Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8')
+        ]);
+        const uploadPath = existing
+          ? `/upload/drive/v3/files/${encodeURIComponent(existing.id)}?uploadType=multipart&fields=id,name,modifiedTime,size`
+          : '/upload/drive/v3/files?uploadType=multipart&fields=id,name,modifiedTime,size';
+        const response = await driveApiFetch(uploadPath, {
+          method: existing ? 'PATCH' : 'POST',
+          headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+          body
+        });
+        const uploaded = await response.json();
+        try {
+          const auth = readGoogleOAuthData();
+          if (auth) {
+            auth.lastBackupAt = Date.now();
+            auth.lastBackupFileId = uploaded.id || (existing && existing.id) || '';
+            auth.lastBackupModifiedTime = uploaded.modifiedTime || '';
+            auth.lastBackupSize = buffer.length;
+            writeGoogleOAuthData(auth);
+          }
+        } catch (_) {}
+        return {
+          success: true,
+          fileId: uploaded.id || (existing && existing.id) || '',
+          modifiedTime: uploaded.modifiedTime || '',
+          size: buffer.length,
+          lastBackupAt: Date.now()
+        };
+      }
+
+      async function driveRestoreBackup() {
+        const existing = await driveFindBackup();
+        if (!existing) throw new Error('No Noctra backup was found on Google Drive');
+        const response = await driveApiFetch(`/files/${encodeURIComponent(existing.id)}?alt=media`);
+        const buffer = Buffer.from(await response.arrayBuffer());
+        return {
+          success: true,
+          data: decryptAccount(buffer),
+          modifiedTime: existing.modifiedTime || '',
+          size: buffer.length
+        };
+      }
+
+      function getDriveStatus() {
+        let auth = null;
+        let error = '';
+        try {
+          auth = readGoogleOAuthData();
+        } catch (err) {
+          error = err && err.message ? err.message : 'Could not read the saved Google account';
+        }
+        const connected = driveScopeGranted(auth);
+        return {
+          success: true,
+          connected,
+          lastBackupAt: auth && auth.lastBackupAt ? auth.lastBackupAt : 0,
+          lastBackupModifiedTime: auth && auth.lastBackupModifiedTime ? auth.lastBackupModifiedTime : '',
+          lastBackupSize: auth && auth.lastBackupSize ? auth.lastBackupSize : 0,
+          error
+        };
+      }
+
+      async function logoutDriveAccount() {
+        let revokeToken = '';
+        try {
+          const auth = readGoogleOAuthData();
+          revokeToken = auth && auth.refreshToken ? auth.refreshToken : '';
+        } catch (_) {}
+        try {
+          if (fs.existsSync(GOOGLE_OAUTH_FILE)) fs.unlinkSync(GOOGLE_OAUTH_FILE);
+        } catch (err) {
+          return { success: false, error: err && err.message ? err.message : 'Could not sign out of Google Drive' };
+        }
+        if (revokeToken) {
+          try {
+            await fetch('https://oauth2.googleapis.com/revoke', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: new URLSearchParams({ token: revokeToken }),
+              signal: AbortSignal.timeout(10000)
+            });
+          } catch (_) {}
+        }
+        return { success: true };
+      }
+
+      ipcMain.handle('gdrive-status', async () => {
+        try { return getDriveStatus(); }
+        catch (err) { return { success: false, connected: false, error: err && err.message ? err.message : 'Google Drive status failed' }; }
+      });
+
+      ipcMain.handle('gdrive-login', async () => {
+        try {
+          let auth = null;
+          try { auth = readGoogleOAuthData(); } catch (_) {}
+          if (!driveScopeGranted(auth)) {
+            await startGoogleOAuthLogin({ scopes: DRIVE_SCOPES });
+          }
+          return getDriveStatus();
+        } catch (err) {
+          let message = err && err.message ? err.message : 'Google Drive sign-in failed';
+          if (/invalid_scope|invalid_client|unauthorized_client|disabled_client/i.test(message)) {
+            message = 'Google Drive access is not configured for this build. Use a Google OAuth client with the Drive API enabled (NOCTRA_GOOGLE_CLIENT_ID).';
+          }
+          return { success: false, connected: false, error: message };
+        }
+      });
+
+      ipcMain.handle('gdrive-logout', async () => logoutDriveAccount());
+
+      ipcMain.handle('gdrive-backup', async (event, payload) => {
+        try {
+          return await driveUploadBackup(payload);
+        } catch (err) {
+          return { success: false, error: err && err.message ? err.message : 'Google Drive backup failed' };
+        }
+      });
+
+      ipcMain.handle('gdrive-restore', async () => {
+        try {
+          return await driveRestoreBackup();
+        } catch (err) {
+          return { success: false, error: err && err.message ? err.message : 'Google Drive restore failed' };
+        }
+      });
 
       ipcMain.handle('google-auth-status', async () => {
         const hasCookies = hasValidYtCookiesFile();
